@@ -2,6 +2,14 @@ import threading
 from typing import Callable
 from pynput import keyboard
 
+# macOS virtual key code for fn / Globe key (kVK_Function = 63).
+# pynput doesn't expose this as Key.fn, so we match by vk.
+_FN_VK = 63
+
+
+def _is_fn(key) -> bool:
+    return isinstance(key, keyboard.KeyCode) and key.vk == _FN_VK
+
 
 class HotkeyManager:
     """Listens for fn (Globe) key: press starts recording, release stops it."""
@@ -26,11 +34,11 @@ class HotkeyManager:
             self._listener = None
 
     def _on_press(self, key):
-        if key == keyboard.Key.fn and not self._fn_down:
+        if _is_fn(key) and not self._fn_down:
             self._fn_down = True
             threading.Thread(target=self.on_start, daemon=True).start()
 
     def _on_release(self, key):
-        if key == keyboard.Key.fn and self._fn_down:
+        if _is_fn(key) and self._fn_down:
             self._fn_down = False
             threading.Thread(target=self.on_stop, daemon=True).start()
