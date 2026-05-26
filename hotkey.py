@@ -3,7 +3,8 @@ from typing import Callable
 from pynput import keyboard
 
 # macOS virtual key code for fn / Globe key (kVK_Function = 63).
-# pynput doesn't expose this as Key.fn, so we match by vk.
+# pynput only fires release events for this key (NSFlagsChanged quirk),
+# so we use toggle mode: first tap starts recording, second tap stops it.
 _FN_VK = 63
 
 
@@ -12,17 +13,16 @@ def _is_fn(key) -> bool:
 
 
 class HotkeyManager:
-    """Listens for fn (Globe) key: press starts recording, release stops it."""
+    """Toggle recording on each fn key tap (tap once = start, tap again = stop)."""
 
     def __init__(self, on_start: Callable, on_stop: Callable):
         self.on_start = on_start
         self.on_stop = on_stop
         self._listener: keyboard.Listener | None = None
-        self._fn_down = False
+        self._recording = False
 
     def start(self):
         self._listener = keyboard.Listener(
-            on_press=self._on_press,
             on_release=self._on_release,
         )
         self._listener.daemon = True
@@ -33,12 +33,12 @@ class HotkeyManager:
             self._listener.stop()
             self._listener = None
 
-    def _on_press(self, key):
-        if _is_fn(key) and not self._fn_down:
-            self._fn_down = True
-            threading.Thread(target=self.on_start, daemon=True).start()
-
     def _on_release(self, key):
-        if _is_fn(key) and self._fn_down:
-            self._fn_down = False
+        if not _is_fn(key):
+            return
+        if not self._recording:
+            self._recording = True
+            threading.Thread(target=self.on_start, daemon=True).start()
+        else:
+            self._recording = False
             threading.Thread(target=self.on_stop, daemon=True).start()

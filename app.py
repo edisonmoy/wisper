@@ -40,7 +40,7 @@ class WisperApp(rumps.App):
     # ------------------------------------------------------------------ menu
 
     def _build_menu(self):
-        self.status_item = rumps.MenuItem('Hold fn to record')
+        self.status_item = rumps.MenuItem('Tap fn to record')
 
         self.history_menu = rumps.MenuItem('History')
         self._refresh_history()
@@ -106,14 +106,14 @@ class WisperApp(rumps.App):
     def _on_fn_down(self):
         self.recorder.start()
         self.title = ICON_RECORDING
-        self.status_item.title = 'Recording… release fn to stop'
+        self.status_item.title = 'Recording… tap fn to stop'
 
     def _on_fn_up(self):
         audio_ms = self.recorder.duration_ms()
         audio = self.recorder.stop()
 
         self.title = ICON_IDLE
-        self.status_item.title = 'Hold fn to record'
+        self.status_item.title = 'Tap fn to record'
 
         if audio is None or audio_ms < MIN_AUDIO_MS:
             return
@@ -126,11 +126,11 @@ class WisperApp(rumps.App):
         except Exception as exc:
             rumps.notification('Wisper', 'Transcription failed', str(exc), sound=False)
             self.title = ICON_IDLE
-            self.status_item.title = 'Hold fn to record'
+            self.status_item.title = 'Tap fn to record'
             return
 
         self.title = ICON_IDLE
-        self.status_item.title = 'Hold fn to record'
+        self.status_item.title = 'Tap fn to record'
 
         if not text:
             return
