@@ -1,9 +1,17 @@
 import subprocess
 import threading
 import setproctitle
+import AppKit
 import rumps
 
 setproctitle.setproctitle('Wisper')
+
+# Hide from Dock. Must be set before rumps touches NSApplication.
+# The Info.plist LSUIElement key is ignored because NSBundle.mainBundle()
+# resolves to the Python framework, not Wisper.app, with a shell launcher.
+AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+    AppKit.NSApplicationActivationPolicyProhibited
+)
 
 from config import APP_DIR, MODELS, Config
 from history import HistoryDB
