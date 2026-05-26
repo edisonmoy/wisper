@@ -1,5 +1,6 @@
 import subprocess
 import threading
+import time
 import setproctitle
 import AppKit
 import rumps
@@ -93,7 +94,10 @@ class WisperApp(rumps.App):
             return
 
         for item in items:
-            label = item['text'][:55] + ('…' if len(item['text']) > 55 else '')
+            snippet = item['text'][:40] + ('…' if len(item['text']) > 40 else '')
+            model = item['model'] or '?'
+            secs = item['latency_ms'] / 1000
+            label = f"{snippet}  [{model} {secs:.1f}s]"
             text = item['text']
             mi = rumps.MenuItem(label, callback=lambda _, t=text: self._recopy(t))
             self.history_menu[str(item['id'])] = mi
@@ -133,7 +137,9 @@ class WisperApp(rumps.App):
         self.status_item.title = 'Transcribing…'
 
         try:
+            t0 = time.monotonic()
             text = self.transcriber.transcribe(audio)
+            latency_ms = int((time.monotonic() - t0) * 1000)
         except Exception as exc:
             rumps.notification('Wisper', 'Transcription failed', str(exc), sound=False)
             self.title = ICON_IDLE
@@ -147,7 +153,7 @@ class WisperApp(rumps.App):
             return
 
         self._paste(text)
-        self.db.add(text, audio_ms=audio_ms)
+        self.db.add(text, audio_ms=audio_ms, model=self.config.model, latency_ms=latency_ms)
         self._needs_history_refresh = True
 
     # -------------------------------------------------------------- output
