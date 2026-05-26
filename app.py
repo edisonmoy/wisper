@@ -137,7 +137,6 @@ class WisperApp(rumps.App):
 
         self._paste(text)
         self.db.add(text, audio_ms=audio_ms)
-        rumps.notification('Wisper', '', text[:120], sound=False)
         self._needs_history_refresh = True
 
     # -------------------------------------------------------------- output
