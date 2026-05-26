@@ -3,13 +3,16 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLIST="$HOME/Library/LaunchAgents/com.wisper.app.plist"
+VENV="$SCRIPT_DIR/.venv"
 
-# 1. Install Python deps
+# 1. Create venv and install deps
+echo "Creating virtual environment…"
+python3 -m venv "$VENV"
 echo "Installing dependencies…"
-pip install -r "$SCRIPT_DIR/requirements.txt"
+"$VENV/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
 
 # 2. Write launchd plist for auto-start on login
-PYTHON_BIN="$(which python3)"
+PYTHON_BIN="$VENV/bin/python3"
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
