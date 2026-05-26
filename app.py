@@ -24,8 +24,17 @@ class WisperApp(rumps.App):
         self.transcriber = Transcriber(self.config.model)
         self.db = HistoryDB(APP_DIR / 'history.db')
 
+        # Flag set by background threads; consumed by main-thread timer.
+        self._needs_history_refresh = False
+
         self._build_menu()
         self._setup_hotkey()
+
+        # Pump UI updates on the main thread so we never touch NSMenu from a
+        # background thread (AppKit requirement).
+        self._timer = rumps.Timer(self._ui_tick, 0.3)
+        self._timer.start()
+
         self.transcriber.preload()
 
     # ------------------------------------------------------------------ menu
@@ -57,7 +66,13 @@ class WisperApp(rumps.App):
         for m, item in self.model_items.items():
             item.title = ('✓ ' if m == self.config.model else '   ') + m
 
+    def _ui_tick(self, _):
+        if self._needs_history_refresh:
+            self._needs_history_refresh = False
+            self._refresh_history()
+
     def _refresh_history(self):
+        """Must be called on the main thread (AppKit constraint)."""
         for key in list(self.history_menu.keys()):
             del self.history_menu[key]
 
@@ -72,9 +87,9 @@ class WisperApp(rumps.App):
             mi = rumps.MenuItem(label, callback=lambda _, t=text: self._recopy(t))
             self.history_menu[str(item['id'])] = mi
 
-        self.history_menu['_sep'] = None
+        # Separator via a disabled, untitled item — avoids None dict-key ambiguity.
         self.history_menu['_clear'] = rumps.MenuItem(
-            'Clear History', callback=self._clear_history
+            '— Clear History', callback=self._clear_history
         )
 
     # --------------------------------------------------------------- hotkey
@@ -123,7 +138,7 @@ class WisperApp(rumps.App):
         self._paste(text)
         self.db.add(text, audio_ms=audio_ms)
         rumps.notification('Wisper', '', text[:120], sound=False)
-        self._refresh_history()
+        self._needs_history_refresh = True
 
     # -------------------------------------------------------------- output
 
@@ -148,7 +163,7 @@ class WisperApp(rumps.App):
 
     def _clear_history(self, _):
         self.db.clear()
-        self._refresh_history()
+        self._needs_history_refresh = True
 
     def _quit(self, _):
         self.hotkey.stop()
