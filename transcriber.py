@@ -14,9 +14,11 @@ class Transcriber:
 
     def transcribe(self, audio: np.ndarray) -> str:
         self._ensure_loaded()
+        # .en models only understand English; multilingual models auto-detect.
+        language = 'en' if self.model_name.endswith('.en') else None
         segments, _ = self._model.transcribe(
             audio,
-            language='en',
+            language=language,
             vad_filter=True,
             vad_parameters={'min_silence_duration_ms': 300},
         )

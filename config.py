@@ -5,7 +5,7 @@ from pathlib import Path
 APP_DIR = Path.home() / '.wisper'
 CONFIG_FILE = APP_DIR / 'config.json'
 
-MODELS = ['tiny.en', 'base.en', 'small.en']
+MODELS = ['tiny.en', 'base.en', 'small.en', 'medium.en', 'distil-large-v3']
 
 
 @dataclass
