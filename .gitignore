@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+
+# Build artifacts
+Wisper.app/
+
+# Generated assets (reproducible via make_icon.py)
+assets/wisper.icns
+
+# Runtime / logs
+.wisper/
+*.log
+
+# macOS
+.DS_Store
