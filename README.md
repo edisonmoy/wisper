@@ -1,6 +1,6 @@
 # Wisper
 
-macOS menu bar dictation app. Tap `fn` to start recording, tap again to transcribe and paste into the focused app.
+macOS menu bar dictation app. Hold `fn` to record, release to transcribe and paste into the focused app.
 
 ## Setup
 
@@ -34,8 +34,8 @@ echo 'export HF_HUB_OFFLINE=1' >> ~/.zshrc
 
 | Action | Result |
 |---|---|
-| Tap `fn` | Start recording (icon → 🔴) |
-| Tap `fn` again | Transcribe + auto-paste (icon → ⏳ → 🎤) |
+| Hold `fn` | Start recording (icon → 🔴) |
+| Release `fn` | Transcribe + auto-paste (icon → ⏳ → 🎤) |
 | Click menu bar icon | Open menu |
 | History submenu | Shows recent transcriptions with model and latency — click any to re-copy |
 | Model submenu | Switch models |
