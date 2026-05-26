@@ -23,7 +23,13 @@ If the fn key opens the emoji picker instead of recording:
 
 **System Settings → Keyboard → Press 🌐 key to → Do Nothing**
 
-The Whisper model (~150 MB) downloads on first use and is cached at `~/.cache/huggingface/`.
+The Whisper model (~150 MB) downloads on first use and is cached at `~/.cache/huggingface/`. After that, transcription runs entirely on your CPU — no audio or text ever leaves your machine.
+
+On startup, the Hugging Face library makes a lightweight version-check request (no audio, just a metadata header). To disable that too, set this env var after the model has been downloaded once:
+
+```bash
+echo 'export HF_HUB_OFFLINE=1' >> ~/.zshrc
+```
 
 ## Usage
 
