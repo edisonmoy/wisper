@@ -40,16 +40,24 @@ echo 'export HF_HUB_OFFLINE=1' >> ~/.zshrc
 | History submenu | Shows recent transcriptions with model and latency — click any to re-copy |
 | Model submenu | Switch models |
 
-## Running manually
+## When to run what
 
+| Situation | Command |
+|---|---|
+| First-time setup | `bash install.sh` |
+| After `git pull` with dependency changes | `bash install.sh` |
+| After `git pull` with code-only changes | `launchctl stop com.wisper.app && launchctl start com.wisper.app` |
+| Day-to-day | Nothing — launchd auto-starts it on login |
+
+To run manually (e.g. for debugging):
 ```bash
-source .venv/bin/activate
 ./Wisper.app/Contents/MacOS/Wisper
 ```
 
-To stop the login item:
+To uninstall the login item:
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.wisper.app.plist
+rm ~/Library/LaunchAgents/com.wisper.app.plist
 ```
 
 ## Models
