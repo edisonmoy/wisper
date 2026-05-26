@@ -1,6 +1,9 @@
 import subprocess
 import threading
+import setproctitle
 import rumps
+
+setproctitle.setproctitle('Wisper')
 
 from config import APP_DIR, MODELS, Config
 from history import HistoryDB
