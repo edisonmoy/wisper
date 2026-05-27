@@ -26,8 +26,6 @@ from updater import check_for_updates, install_update
 from utils import format_age
 
 ICON_IDLE = '🎤'
-ICON_RECORDING = '🔴'
-ICON_THINKING = '⏳'
 
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
 
@@ -160,7 +158,6 @@ class WisperApp(rumps.App):
 
     def _on_fn_down(self):
         self.recorder.start()
-        self.title = ICON_RECORDING
         self.status_item.title = 'Recording… release fn to stop'
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('show:', None, False)
 
@@ -169,13 +166,11 @@ class WisperApp(rumps.App):
         audio = self.recorder.stop()
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)
 
-        self.title = ICON_IDLE
         self.status_item.title = 'Hold fn to record'
 
         if audio is None or audio_ms < MIN_AUDIO_MS:
             return
 
-        self.title = ICON_THINKING
         self.status_item.title = 'Transcribing…'
 
         try:
@@ -184,11 +179,9 @@ class WisperApp(rumps.App):
             latency_ms = int((time.monotonic() - t0) * 1000)
         except Exception as exc:
             rumps.notification('Wisper', 'Transcription failed', str(exc), sound=False)
-            self.title = ICON_IDLE
             self.status_item.title = 'Hold fn to record'
             return
 
-        self.title = ICON_IDLE
         self.status_item.title = 'Hold fn to record'
 
         if not text:
