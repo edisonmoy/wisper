@@ -1,5 +1,3 @@
-import math
-
 import objc
 from AppKit import (
     NSAppearance,
@@ -87,9 +85,7 @@ def create_recording_overlay(get_waveform_fn) -> "RecordingOverlay":
     obj = RecordingOverlay.alloc().init()
     obj._get_waveform = get_waveform_fn
     obj._visible = False
-    obj._tick = 0
     obj._waveform_view = None
-    obj._dot_layer = None
     obj._panel = None
     obj._build_panel()
     # 30 fps refresh on the main run loop
@@ -139,21 +135,9 @@ class RecordingOverlay(NSObject):
         effect.layer().setMasksToBounds_(True)
         content.addSubview_(effect)
 
-        # Waveform area (leave ~22px on the left for the dot)
-        wv = _WaveformView.alloc().initWithFrame_(NSMakeRect(22, 0, PANEL_W - 28, PANEL_H))
+        wv = _WaveformView.alloc().initWithFrame_(NSMakeRect(6, 0, PANEL_W - 12, PANEL_H))
         effect.addSubview_(wv)
         self._waveform_view = wv
-
-        # Pulsing red recording indicator dot
-        dot_d = 6
-        dot = NSView.alloc().initWithFrame_(
-            NSMakeRect((22 - dot_d) / 2, (PANEL_H - dot_d) / 2, dot_d, dot_d)
-        )
-        dot.setWantsLayer_(True)
-        dot.layer().setCornerRadius_(dot_d / 2)
-        dot.layer().setBackgroundColor_(NSColor.systemRedColor().CGColor())
-        effect.addSubview_(dot)
-        self._dot_layer = dot.layer()
 
         self._panel = panel
 
@@ -194,11 +178,7 @@ class RecordingOverlay(NSObject):
     # ---------------------------------------------------------------- timer
 
     def tick_(self, _timer):
-        self._tick += 1
         if not self._visible:
             return
         if self._waveform_view is not None:
             self._waveform_view.setSamples_(self._get_waveform())
-        if self._dot_layer is not None:
-            alpha = 0.55 + 0.45 * math.sin(self._tick * 2 * math.pi / 30)
-            self._dot_layer.setOpacity_(alpha)
