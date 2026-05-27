@@ -1,3 +1,4 @@
+import os
 import subprocess
 import threading
 import time
@@ -93,6 +94,10 @@ class WisperApp(rumps.App):
             item.title = ('✓ ' if m == self.config.model else '   ') + m
 
     def _ui_tick(self, _):
+        # Quit must happen on the main thread; background install sets this state.
+        if self._update_state == 'restarting':
+            rumps.quit_application()
+            return
         if self._needs_history_refresh:
             self._needs_history_refresh = False
             self._refresh_history()
@@ -111,6 +116,8 @@ class WisperApp(rumps.App):
             title, enabled = f'Install Update  ({s} new {word})', True
         elif s == 'installing':
             title, enabled = 'Installing update…', False
+        elif s == 'restarting':
+            title, enabled = 'Restarting…', False
         else:  # 'error'
             title, enabled = 'Update check failed — retry', True
         self.update_item.title = title
@@ -233,11 +240,33 @@ class WisperApp(rumps.App):
 
     def _run_install(self):
         ok = install_update(REPO_DIR)
-        if ok:
-            self.hotkey.stop()
-            rumps.quit_application()  # launchd KeepAlive restarts with new code
-        else:
+        if not ok:
             self._update_state = 'error'
+            return
+
+        self.hotkey.stop()
+
+        # Try launchctl kickstart first — this handles the normal launchd-managed
+        # case and starts the new process before this one exits.
+        r = subprocess.run(
+            ['launchctl', 'kickstart', '-k', f'gui/{os.getuid()}/com.wisper.app'],
+            capture_output=True,
+        )
+        if r.returncode != 0:
+            # Not managed by launchd (e.g. started from terminal) — spawn directly.
+            launcher = REPO_DIR / 'Wisper.app' / 'Contents' / 'MacOS' / 'Wisper'
+            if launcher.exists():
+                subprocess.Popen(
+                    [str(launcher)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,  # detach so it survives this process exiting
+                )
+
+        # Signal _ui_tick to call rumps.quit_application() on the main thread.
+        # Calling it directly here (background thread) causes an unclean exit
+        # that makes launchd throttle the restart.
+        self._update_state = 'restarting'
 
     # --------------------------------------------------------------- quit
 
