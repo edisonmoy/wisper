@@ -25,14 +25,43 @@ from transcriber import Transcriber
 from updater import check_for_updates, install_update
 from utils import format_age
 
-ICON_IDLE = '🎤'
-
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
+
+
+def _make_menubar_image():
+    """Draw a 5-bar waveform as a black-on-transparent template NSImage.
+
+    macOS template images are automatically rendered white on dark menu bars
+    and black on light ones, matching all other system status icons.
+    """
+    from Foundation import NSMakeRect
+    size = 22.0  # standard menu-bar icon point size
+    img = AppKit.NSImage.alloc().initWithSize_((size, size))
+    img.lockFocus()
+    bar_w, gap = 3.0, 1.0
+    heights = [7.0, 13.0, 19.0, 13.0, 7.0]
+    total_w = len(heights) * (bar_w + gap) - gap
+    x0 = (size - total_w) / 2
+    AppKit.NSColor.blackColor().setFill()
+    for i, h in enumerate(heights):
+        x = x0 + i * (bar_w + gap)
+        y = (size - h) / 2
+        path = AppKit.NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+            NSMakeRect(x, y, bar_w, h), 1.0, 1.0
+        )
+        path.fill()
+    img.unlockFocus()
+    img.setTemplate_(True)
+    return img
 
 
 class WisperApp(rumps.App):
     def __init__(self):
-        super().__init__(ICON_IDLE, quit_button=None)
+        super().__init__('Wisper', quit_button=None)
+        # Replace the text title with the waveform template image.
+        btn = self._status_item.button()
+        btn.setImage_(_make_menubar_image())
+        btn.setTitle_('')
         self.config = Config.load()
 
         self.recorder = AudioRecorder()
