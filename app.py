@@ -23,6 +23,7 @@ from overlay import create_recording_overlay
 from recorder import AudioRecorder
 from transcriber import Transcriber
 from updater import check_for_updates, install_update
+from utils import format_age
 
 ICON_IDLE = '🎤'
 ICON_RECORDING = '🔴'
@@ -82,7 +83,6 @@ class WisperApp(rumps.App):
             self.status_item,
             None,
             self.history_menu,
-            None,
             model_menu,
             None,
             self.update_item,
@@ -112,8 +112,7 @@ class WisperApp(rumps.App):
         elif s == 0:
             title, enabled = 'Up to date ✓', True
         elif isinstance(s, int):
-            word = 'commit' if s == 1 else 'commits'
-            title, enabled = f'Install Update  ({s} new {word})', True
+            title, enabled = 'Update Available — Install', True
         elif s == 'installing':
             title, enabled = 'Installing update…', False
         elif s == 'restarting':
@@ -134,10 +133,11 @@ class WisperApp(rumps.App):
             return
 
         for item in items:
-            snippet = item['text'][:40] + ('…' if len(item['text']) > 40 else '')
+            snippet = item['text'][:38] + ('…' if len(item['text']) > 38 else '')
             model = item['model'] or '?'
             secs = item['latency_ms'] / 1000
-            label = f"{snippet}  [{model} {secs:.1f}s]"
+            age = format_age(item['created_at'])
+            label = f"{snippet}    {age}  ·  {model}  {secs:.1f}s"
             text = item['text']
             mi = rumps.MenuItem(label, callback=lambda _, t=text: self._recopy(t))
             self.history_menu[str(item['id'])] = mi
@@ -237,6 +237,12 @@ class WisperApp(rumps.App):
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
         self._update_state = n if n >= 0 else 'error'
+        if n == 0:
+            threading.Timer(4.0, self._reset_update_state).start()
+
+    def _reset_update_state(self):
+        if self._update_state == 0:
+            self._update_state = None
 
     def _run_install(self):
         ok = install_update(REPO_DIR)
