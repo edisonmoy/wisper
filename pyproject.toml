@@ -1,0 +1,20 @@
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# NSApplication activation-policy must be set before importing rumps/AppKit;
+# the local imports that follow are intentionally below that call.
+"app.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "config", "history", "hotkey", "overlay",
+    "recorder", "transcriber", "updater",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

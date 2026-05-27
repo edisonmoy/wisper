@@ -1,14 +1,15 @@
 import math
+
 import objc
 from AppKit import (
-    NSObject,
-    NSView,
-    NSPanel,
-    NSVisualEffectView,
-    NSColor,
-    NSBezierPath,
-    NSScreen,
     NSBackingStoreBuffered,
+    NSBezierPath,
+    NSColor,
+    NSObject,
+    NSPanel,
+    NSScreen,
+    NSView,
+    NSVisualEffectView,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
 )
 from Foundation import NSMakeRect, NSTimer

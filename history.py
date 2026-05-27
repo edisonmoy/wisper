@@ -37,7 +37,8 @@ class HistoryDB:
     def get_recent(self, n: int = 20) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
-                'SELECT id, text, model, latency_ms, created_at FROM history ORDER BY id DESC LIMIT ?',
+                'SELECT id, text, model, latency_ms, created_at'
+                ' FROM history ORDER BY id DESC LIMIT ?',
                 (n,),
             ).fetchall()
         return [
