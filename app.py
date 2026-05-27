@@ -14,7 +14,8 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
     AppKit.NSApplicationActivationPolicyProhibited
 )
 
-from config import APP_DIR, MODELS, Config
+from config import APP_DIR, REPO_DIR, MODELS, Config
+from updater import check_for_updates, install_update
 from history import HistoryDB
 from hotkey import HotkeyManager
 from overlay import RecordingOverlay
@@ -41,6 +42,9 @@ class WisperApp(rumps.App):
         # Flag set by background threads; consumed by main-thread timer.
         self._needs_history_refresh = False
 
+        # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
+        self._update_state = None
+
         self._build_menu()
         self._setup_hotkey()
 
@@ -50,6 +54,9 @@ class WisperApp(rumps.App):
         self._timer.start()
 
         self.transcriber.preload()
+
+        # Background update check 5s after launch (non-blocking).
+        threading.Timer(5.0, self._run_update_check).start()
 
     # ------------------------------------------------------------------ menu
 
@@ -67,12 +74,16 @@ class WisperApp(rumps.App):
             self.model_items[m] = item
         self._sync_model_checkmarks()
 
+        self.update_item = rumps.MenuItem('Check for Updates', callback=self._update_action)
+
         self.menu = [
             self.status_item,
             None,
             self.history_menu,
             None,
             model_menu,
+            None,
+            self.update_item,
             rumps.MenuItem('Quit Wisper', callback=self._quit),
         ]
 
@@ -84,6 +95,25 @@ class WisperApp(rumps.App):
         if self._needs_history_refresh:
             self._needs_history_refresh = False
             self._refresh_history()
+        self._sync_update_item()
+
+    def _sync_update_item(self):
+        s = self._update_state
+        if s is None:
+            title, enabled = 'Check for Updates', True
+        elif s == 'checking':
+            title, enabled = 'Checking for updates…', False
+        elif s == 0:
+            title, enabled = 'Up to date ✓', True
+        elif isinstance(s, int):
+            word = 'commit' if s == 1 else 'commits'
+            title, enabled = f'Install Update  ({s} new {word})', True
+        elif s == 'installing':
+            title, enabled = 'Installing update…', False
+        else:  # 'error'
+            title, enabled = 'Update check failed — retry', True
+        self.update_item.title = title
+        self.update_item._menuitem.setEnabled_(enabled)
 
     def _refresh_history(self):
         """Must be called on the main thread (AppKit constraint)."""
@@ -184,6 +214,31 @@ class WisperApp(rumps.App):
     def _clear_history(self, _):
         self.db.clear()
         self._needs_history_refresh = True
+
+    # ------------------------------------------------------------ updates
+
+    def _update_action(self, _):
+        s = self._update_state
+        if s in (None, 0, 'error'):
+            self._update_state = 'checking'
+            threading.Thread(target=self._run_update_check, daemon=True).start()
+        elif isinstance(s, int) and s > 0:
+            self._update_state = 'installing'
+            threading.Thread(target=self._run_install, daemon=True).start()
+
+    def _run_update_check(self):
+        n = check_for_updates(REPO_DIR)
+        self._update_state = n if n >= 0 else 'error'
+
+    def _run_install(self):
+        ok = install_update(REPO_DIR)
+        if ok:
+            self.hotkey.stop()
+            rumps.quit_application()  # launchd KeepAlive restarts with new code
+        else:
+            self._update_state = 'error'
+
+    # --------------------------------------------------------------- quit
 
     def _quit(self, _):
         self.hotkey.stop()

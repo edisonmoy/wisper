@@ -2,6 +2,7 @@ from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
 
+REPO_DIR = Path(__file__).parent.resolve()
 APP_DIR = Path.home() / '.wisper'
 CONFIG_FILE = APP_DIR / 'config.json'
 
