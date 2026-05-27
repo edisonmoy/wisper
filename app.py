@@ -71,10 +71,6 @@ class _MenuDelegate(AppKit.NSObject):
 class WisperApp(rumps.App):
     def __init__(self):
         super().__init__('Wisper', quit_button=None)
-        # Replace the text title with the waveform template image.
-        btn = self._status_item.button()
-        btn.setImage_(_make_menubar_image())
-        btn.setTitle_('')
         self.config = Config.load()
 
         self.recorder = AudioRecorder()
@@ -88,11 +84,12 @@ class WisperApp(rumps.App):
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
         self._update_state = None
 
+        # _nsapp (rumps internals) is only created inside run(); defer NSStatusItem
+        # customisation to the first _ui_tick so the run loop has already started.
+        self._nsapp_configured = False
+
         self._menu_delegate = _MenuDelegate.alloc().init()
         self._build_menu()
-        nsm = self._status_item.menu()
-        if nsm:
-            nsm.setDelegate_(self._menu_delegate)
         self._setup_hotkey()
 
         # Pump UI updates on the main thread so we never touch NSMenu from a
@@ -137,7 +134,21 @@ class WisperApp(rumps.App):
         for m, item in self.model_items.items():
             item.title = ('✓ ' if m == self.config.model else '   ') + m
 
+    def _configure_nsapp(self):
+        """One-time deferred setup that requires the NSApp run loop to be running."""
+        nssi = self._nsapp.nsstatusitem
+        btn = nssi.button()
+        if btn is not None:
+            btn.setImage_(_make_menubar_image())
+            btn.setTitle_('')
+        nsm = nssi.menu()
+        if nsm:
+            nsm.setDelegate_(self._menu_delegate)
+
     def _ui_tick(self, _):
+        if not self._nsapp_configured:
+            self._configure_nsapp()
+            self._nsapp_configured = True
         # Quit must happen on the main thread; background install sets this state.
         if self._update_state == 'restarting':
             rumps.quit_application()
