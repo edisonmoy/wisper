@@ -77,27 +77,29 @@ class _WaveformView(NSView):
         return False
 
 
+def create_recording_overlay(get_waveform_fn) -> 'RecordingOverlay':
+    """Module-level factory — keeps the extra arg away from PyObjC's selector scanner."""
+    obj = RecordingOverlay.alloc().init()
+    obj._get_waveform = get_waveform_fn
+    obj._visible = False
+    obj._tick = 0
+    obj._waveform_view = None
+    obj._dot_layer = None
+    obj._panel = None
+    obj._build_panel()
+    # 30 fps refresh on the main run loop
+    obj._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+        1.0 / 30, obj, 'tick:', None, True
+    )
+    return obj
+
+
 class RecordingOverlay(NSObject):
     """Floating non-interactive waveform overlay shown while recording."""
 
-    @classmethod
-    def create(cls, get_waveform_fn):
-        obj = cls.alloc().init()
-        obj._get_waveform = get_waveform_fn
-        obj._visible = False
-        obj._tick = 0
-        obj._waveform_view = None
-        obj._dot_layer = None
-        obj._panel = None
-        obj._build_panel()
-        # 30 fps refresh on the main run loop
-        obj._timer = NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-            1.0 / 30, obj, 'tick:', None, True
-        )
-        return obj
-
     # ---------------------------------------------------------------- setup
 
+    @objc.python_method
     def _build_panel(self):
         screen = NSScreen.mainScreen()
         if screen is None:

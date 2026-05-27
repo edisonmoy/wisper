@@ -18,7 +18,7 @@ from config import APP_DIR, REPO_DIR, MODELS, Config
 from updater import check_for_updates, install_update
 from history import HistoryDB
 from hotkey import HotkeyManager
-from overlay import RecordingOverlay
+from overlay import create_recording_overlay
 from recorder import AudioRecorder
 from transcriber import Transcriber
 
@@ -37,7 +37,7 @@ class WisperApp(rumps.App):
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber(self.config.model)
         self.db = HistoryDB(APP_DIR / 'history.db')
-        self.overlay = RecordingOverlay.create(self.recorder.get_waveform)
+        self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
         # Flag set by background threads; consumed by main-thread timer.
         self._needs_history_refresh = False
