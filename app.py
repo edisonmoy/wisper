@@ -4,6 +4,7 @@ import threading
 import time
 
 import AppKit
+import objc
 import rumps
 import setproctitle
 
@@ -55,6 +56,18 @@ def _make_menubar_image():
     return img
 
 
+class _MenuDelegate(AppKit.NSObject):
+    """NSMenu delegate that can hold the menu open during a short async operation."""
+
+    def init(self):
+        self = objc.super(_MenuDelegate, self).init()
+        self._block = False
+        return self
+
+    def menuShouldClose_(self, _menu):
+        return not self._block
+
+
 class WisperApp(rumps.App):
     def __init__(self):
         super().__init__('Wisper', quit_button=None)
@@ -75,7 +88,11 @@ class WisperApp(rumps.App):
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
         self._update_state = None
 
+        self._menu_delegate = _MenuDelegate.alloc().init()
         self._build_menu()
+        nsm = self._status_item.menu()
+        if nsm:
+            nsm.setDelegate_(self._menu_delegate)
         self._setup_hotkey()
 
         # Pump UI updates on the main thread so we never touch NSMenu from a
@@ -251,14 +268,21 @@ class WisperApp(rumps.App):
         s = self._update_state
         if s in (None, 0, 'error'):
             self._update_state = 'checking'
+            self._menu_delegate._block = True
+            # Safety release so a hung network can't trap the menu forever.
+            threading.Timer(15.0, self._unblock_menu).start()
             threading.Thread(target=self._run_update_check, daemon=True).start()
         elif isinstance(s, int) and s > 0:
             self._update_state = 'installing'
             threading.Thread(target=self._run_install, daemon=True).start()
 
+    def _unblock_menu(self):
+        self._menu_delegate._block = False
+
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
         self._update_state = n if n >= 0 else 'error'
+        self._unblock_menu()
         if n == 0:
             threading.Timer(4.0, self._reset_update_state).start()
 
