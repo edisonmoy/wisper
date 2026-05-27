@@ -1,9 +1,10 @@
 import subprocess
 import threading
 import time
-import setproctitle
+
 import AppKit
 import rumps
+import setproctitle
 
 setproctitle.setproctitle('Wisper')
 
@@ -14,13 +15,13 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
     AppKit.NSApplicationActivationPolicyProhibited
 )
 
-from config import APP_DIR, REPO_DIR, MODELS, Config
-from updater import check_for_updates, install_update
+from config import APP_DIR, MODELS, REPO_DIR, Config
 from history import HistoryDB
 from hotkey import HotkeyManager
 from overlay import create_recording_overlay
 from recorder import AudioRecorder
 from transcriber import Transcriber
+from updater import check_for_updates, install_update
 
 ICON_IDLE = '🎤'
 ICON_RECORDING = '🔴'

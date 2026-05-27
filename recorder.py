@@ -1,5 +1,6 @@
 import collections
 import threading
+
 import numpy as np
 
 SAMPLE_RATE = 16_000  # Hz — what Whisper expects

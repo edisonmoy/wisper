@@ -1,5 +1,6 @@
 import threading
 from typing import Callable
+
 from pynput import keyboard
 
 # macOS virtual key code for fn / Globe key (kVK_Function = 63).
