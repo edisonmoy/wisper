@@ -17,6 +17,7 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
 from config import APP_DIR, MODELS, Config
 from history import HistoryDB
 from hotkey import HotkeyManager
+from overlay import RecordingOverlay
 from recorder import AudioRecorder
 from transcriber import Transcriber
 
@@ -35,6 +36,7 @@ class WisperApp(rumps.App):
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber(self.config.model)
         self.db = HistoryDB(APP_DIR / 'history.db')
+        self.overlay = RecordingOverlay.create(self.recorder.get_waveform)
 
         # Flag set by background threads; consumed by main-thread timer.
         self._needs_history_refresh = False
@@ -122,10 +124,12 @@ class WisperApp(rumps.App):
         self.recorder.start()
         self.title = ICON_RECORDING
         self.status_item.title = 'Recording… release fn to stop'
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('show:', None, False)
 
     def _on_fn_up(self):
         audio_ms = self.recorder.duration_ms()
         audio = self.recorder.stop()
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)
 
         self.title = ICON_IDLE
         self.status_item.title = 'Hold fn to record'
