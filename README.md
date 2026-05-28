@@ -2,7 +2,7 @@
 
 > macOS menu bar app for instant voice-to-text — hold a hotkey, speak, release, and your transcription is pasted wherever your cursor is.
 
-Inspired by and UI-compatible with [WhisperFlow](https://github.com/ryanpaulanderson/whisperflow). If you've used WhisperFlow, Wisper will feel immediately familiar: same hotkey-to-paste workflow, same menu bar experience.
+Inspired by and UI-compatible with [WisperFlow](https://wisprflow.ai/). If you've used WisperFlow, Wisper will feel immediately familiar: same hotkey-to-paste workflow, same menu bar experience.
 
 ---
 
