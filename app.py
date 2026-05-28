@@ -251,17 +251,15 @@ class WisperApp(rumps.App):
     # -------------------------------------------------------------- output
 
     def _paste(self, text: str):
-        # Save current clipboard contents so we don't clobber it
         saved = subprocess.run(['pbpaste'], capture_output=True).stdout
-
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
         subprocess.run([
             'osascript', '-e',
             'tell application "System Events" to keystroke "v" using command down',
         ])
-
-        # Restore the original clipboard
-        subprocess.run(['pbcopy'], input=saved, check=True)
+        # Restore clipboard after a short delay so the paste keystroke has
+        # time to be consumed by the target app before we overwrite the clipboard.
+        threading.Timer(0.5, lambda: subprocess.run(['pbcopy'], input=saved, check=True)).start()
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
