@@ -253,13 +253,17 @@ class WisperApp(rumps.App):
     def _paste(self, text: str):
         pb = AppKit.NSPasteboard.generalPasteboard()
 
-        # Snapshot every item currently on the clipboard (preserves images,
-        # rich text, files, etc. — not just plain text).
+        # Snapshot every item — copy the raw bytes out so they survive clearContents().
         saved_items = []
         for item in (pb.pasteboardItems() or []):
-            saved_types = item.types()
-            saved_data = {t: item.dataForType_(t) for t in saved_types}
-            saved_items.append(saved_data)
+            saved_data = {}
+            for ptype in item.types():
+                data = item.dataForType_(ptype)
+                if data:
+                    # Convert to plain Python bytes to avoid any ObjC lifetime issues.
+                    saved_data[ptype] = bytes(data)
+            if saved_data:
+                saved_items.append(saved_data)
 
         # Write the transcription as plain text so cmd-v inserts it.
         pb.clearContents()
@@ -271,21 +275,24 @@ class WisperApp(rumps.App):
         ])
 
         def _restore():
-            # NSPasteboard must be written on the main thread.
-            def _do_restore():
-                pb.clearContents()
-                ns_items = []
-                for saved_data in saved_items:
-                    new_item = AppKit.NSPasteboardItem.new()
-                    for ptype, data in saved_data.items():
-                        if data:
-                            new_item.setData_forType_(data, ptype)
-                    ns_items.append(new_item)
-                if ns_items:
-                    pb.writeObjects_(ns_items)
-            AppKit.NSRunLoop.mainRunLoop().performBlock_(_do_restore)
+            pb.clearContents()
+            ns_items = []
+            for saved_data in saved_items:
+                new_item = AppKit.NSPasteboardItem.new()
+                for ptype, raw in saved_data.items():
+                    ns_data = AppKit.NSData.dataWithBytes_length_(raw, len(raw))
+                    new_item.setData_forType_(ns_data, ptype)
+                ns_items.append(new_item)
+            if ns_items:
+                pb.writeObjects_(ns_items)
 
-        threading.Timer(0.5, _restore).start()
+        # Dispatch restore onto the main queue after giving the paste keystroke
+        # time to be consumed. NSPasteboard writes must happen on the main thread.
+        def _schedule_restore():
+            import Foundation
+            Foundation.NSOperationQueue.mainQueue().addOperationWithBlock_(_restore)
+
+        threading.Timer(0.5, _schedule_restore).start()
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
