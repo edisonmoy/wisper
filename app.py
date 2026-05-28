@@ -251,15 +251,41 @@ class WisperApp(rumps.App):
     # -------------------------------------------------------------- output
 
     def _paste(self, text: str):
-        saved = subprocess.run(['pbpaste'], capture_output=True).stdout
-        subprocess.run(['pbcopy'], input=text.encode(), check=True)
+        pb = AppKit.NSPasteboard.generalPasteboard()
+
+        # Snapshot every item currently on the clipboard (preserves images,
+        # rich text, files, etc. — not just plain text).
+        saved_items = []
+        for item in (pb.pasteboardItems() or []):
+            saved_types = item.types()
+            saved_data = {t: item.dataForType_(t) for t in saved_types}
+            saved_items.append(saved_data)
+
+        # Write the transcription as plain text so cmd-v inserts it.
+        pb.clearContents()
+        pb.setString_forType_(text, AppKit.NSPasteboardTypeString)
+
         subprocess.run([
             'osascript', '-e',
             'tell application "System Events" to keystroke "v" using command down',
         ])
-        # Restore clipboard after a short delay so the paste keystroke has
-        # time to be consumed by the target app before we overwrite the clipboard.
-        threading.Timer(0.5, lambda: subprocess.run(['pbcopy'], input=saved, check=True)).start()
+
+        def _restore():
+            # NSPasteboard must be written on the main thread.
+            def _do_restore():
+                pb.clearContents()
+                ns_items = []
+                for saved_data in saved_items:
+                    new_item = AppKit.NSPasteboardItem.new()
+                    for ptype, data in saved_data.items():
+                        if data:
+                            new_item.setData_forType_(data, ptype)
+                    ns_items.append(new_item)
+                if ns_items:
+                    pb.writeObjects_(ns_items)
+            AppKit.NSRunLoop.mainRunLoop().performBlock_(_do_restore)
+
+        threading.Timer(0.5, _restore).start()
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
