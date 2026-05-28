@@ -63,8 +63,8 @@ macOS requires two permissions (you'll be prompted):
 
 | Action | Result |
 |---|---|
-| Hold `fn` | Start recording (icon turns 🔴) |
-| Release `fn` | Transcribe + paste at cursor (icon → ⏳ → 🎤) |
+| Hold `fn` | Start recording |
+| Release `fn` | Transcribe + paste at cursor |
 | Click menu bar icon | Open menu |
 | History submenu | Recent transcriptions — click any to re-copy |
 | Model submenu | Switch Whisper models |
