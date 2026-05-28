@@ -271,16 +271,19 @@ class WisperApp(rumps.App):
         ])
 
         def _restore():
-            pb.clearContents()
-            ns_items = []
-            for saved_data in saved_items:
-                new_item = AppKit.NSPasteboardItem.new()
-                for ptype, data in saved_data.items():
-                    if data:
-                        new_item.setData_forType_(data, ptype)
-                ns_items.append(new_item)
-            if ns_items:
-                pb.writeObjects_(ns_items)
+            # NSPasteboard must be written on the main thread.
+            def _do_restore():
+                pb.clearContents()
+                ns_items = []
+                for saved_data in saved_items:
+                    new_item = AppKit.NSPasteboardItem.new()
+                    for ptype, data in saved_data.items():
+                        if data:
+                            new_item.setData_forType_(data, ptype)
+                    ns_items.append(new_item)
+                if ns_items:
+                    pb.writeObjects_(ns_items)
+            AppKit.NSRunLoop.mainRunLoop().performBlock_(_do_restore)
 
         threading.Timer(0.5, _restore).start()
 
