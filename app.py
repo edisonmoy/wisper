@@ -58,15 +58,30 @@ def _make_menubar_image():
 
 
 class _MenuDelegate(AppKit.NSObject):
-    """NSMenu delegate that can hold the menu open during a short async operation."""
+    """NSMenu delegate that keeps the menu open during an async update check.
+
+    menuShouldClose_ fires during the click event — before the Python
+    callback runs — so _block must be set earlier, in willHighlightItem_,
+    while the cursor is hovering over the update item.
+    """
 
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
-        self._block = False
+        self._hover_on_update = False  # cursor is over the update item
+        self._check_active = False     # a check/install is in progress
+        self.update_nsitem = None      # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
-        return not self._block
+        return not (self._hover_on_update or self._check_active)
+
+    def menuDidClose_(self, _menu):
+        self._hover_on_update = False
+
+    def menu_willHighlightItem_(self, menu, item):
+        if self.update_nsitem is None or self._check_active:
+            return
+        self._hover_on_update = (item is not None and item == self.update_nsitem)
 
 
 class WisperApp(rumps.App):
@@ -167,6 +182,7 @@ class WisperApp(rumps.App):
         nsm = nssi.menu()
         if nsm:
             nsm.setDelegate_(self._menu_delegate)
+            self._menu_delegate.update_nsitem = self.update_item._menuitem
 
     def _ui_tick(self, _):
         if not self._nsapp_configured:
@@ -309,7 +325,7 @@ class WisperApp(rumps.App):
         s = self._update_state
         if s in (None, 0, 'error'):
             self._update_state = 'checking'
-            self._menu_delegate._block = True
+            self._menu_delegate._check_active = True
             # Safety release so a hung network can't trap the menu forever.
             threading.Timer(15.0, self._unblock_menu).start()
             threading.Thread(target=self._run_update_check, daemon=True).start()
@@ -318,7 +334,7 @@ class WisperApp(rumps.App):
             threading.Thread(target=self._run_install, daemon=True).start()
 
     def _unblock_menu(self):
-        self._menu_delegate._block = False
+        self._menu_delegate._check_active = False
 
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
