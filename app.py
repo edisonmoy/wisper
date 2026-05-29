@@ -100,6 +100,10 @@ class WisperApp(rumps.App):
         self._pending_restore: list | None = None  # clipboard snapshot to restore
         self._pasting = False  # blocks _ui_tick restore during pbcopy→cmd+v window
 
+        # Watchdog state
+        self._recording_started_at: float | None = None
+        self._mismatch_ticks = 0
+
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
         self._update_state = None
 
@@ -203,6 +207,7 @@ class WisperApp(rumps.App):
         if self._pending_restore is not None and not self._pasting:
             self._restore_clipboard(self._pending_restore)
             self._pending_restore = None
+        self._watchdog()
 
     def _restore_clipboard(self, saved_items: list):
         pb = AppKit.NSPasteboard.generalPasteboard()
@@ -216,6 +221,37 @@ class WisperApp(rumps.App):
             ns_items.append(item)
         if ns_items:
             pb.writeObjects_(ns_items)
+
+    # ------------------------------------------------------------- watchdog
+
+    _MAX_RECORDING_S = 300  # 5 minutes — auto-stop if stuck this long
+    _MISMATCH_GRACE = 3     # ticks (~0.9 s) before treating divergence as stuck
+
+    def _watchdog(self):
+        recorder_on = self.recorder.is_recording
+        hotkey_on = self.hotkey._recording
+
+        # Detect divergence between the two state machines.
+        if recorder_on != hotkey_on:
+            self._mismatch_ticks += 1
+            if self._mismatch_ticks >= self._MISMATCH_GRACE:
+                self._emergency_reset('state mismatch')
+            return
+        self._mismatch_ticks = 0
+
+        # Enforce maximum recording duration.
+        if recorder_on and self._recording_started_at is not None:
+            if time.monotonic() - self._recording_started_at > self._MAX_RECORDING_S:
+                self._emergency_reset('max duration exceeded')
+
+    def _emergency_reset(self, reason: str = ''):
+        self.recorder.stop()
+        self.hotkey.force_reset()
+        self._recording_started_at = None
+        self._mismatch_ticks = 0
+        self._pasting = False
+        self.status_item.title = 'Hold fn to record'
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)
 
     def _sync_update_item(self):
         s = self._update_state
@@ -273,11 +309,17 @@ class WisperApp(rumps.App):
     # ------------------------------------------------------------ recording
 
     def _on_fn_down(self):
-        self.recorder.start()
+        try:
+            self.recorder.start()
+        except Exception as exc:
+            rumps.notification('Wisper', 'Could not start recording', str(exc), sound=False)
+            raise  # re-raise so HotkeyManager rolls back _recording = False
+        self._recording_started_at = time.monotonic()
         self.status_item.title = 'Recording… release fn to stop'
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('show:', None, False)
 
     def _on_fn_up(self):
+        self._recording_started_at = None
         audio_ms = self.recorder.duration_ms()
         audio = self.recorder.stop()
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)

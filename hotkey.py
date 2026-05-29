@@ -56,12 +56,25 @@ class HotkeyManager:
         if not self._recording:
             self._recording = True
             def _run():
-                self.on_start()
-                self._busy = False
+                try:
+                    self.on_start()
+                except Exception:
+                    self._recording = False  # roll back so state stays consistent
+                finally:
+                    self._busy = False
             threading.Thread(target=_run, daemon=True).start()
         else:
             self._recording = False
             def _run():
-                self.on_stop()
-                self._busy = False
+                try:
+                    self.on_stop()
+                except Exception:
+                    pass
+                finally:
+                    self._busy = False
             threading.Thread(target=_run, daemon=True).start()
+
+    def force_reset(self):
+        """Reset all internal state — called by the watchdog when things diverge."""
+        self._recording = False
+        self._busy = False

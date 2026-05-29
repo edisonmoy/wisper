@@ -45,6 +45,7 @@ def test_first_tap_calls_on_start(mgr):
 
 def test_second_tap_calls_on_stop(mgr):
     mgr._on_release(FN)
+    time.sleep(0.15)  # wait past debounce window
     mgr._on_release(FN)
     time.sleep(0.05)
     mgr.on_start.assert_called_once()
@@ -53,7 +54,9 @@ def test_second_tap_calls_on_stop(mgr):
 
 def test_third_tap_starts_again(mgr):
     mgr._on_release(FN)
+    time.sleep(0.15)
     mgr._on_release(FN)
+    time.sleep(0.15)
     mgr._on_release(FN)
     time.sleep(0.05)
     assert mgr.on_start.call_count == 2
@@ -69,8 +72,10 @@ def test_non_fn_key_ignored(mgr):
 def test_recording_state_toggles(mgr):
     assert mgr._recording is False
     mgr._on_release(FN)
+    time.sleep(0.15)
     assert mgr._recording is True
     mgr._on_release(FN)
+    time.sleep(0.05)
     assert mgr._recording is False
 
 
@@ -99,3 +104,41 @@ def test_stop_halts_listener(mgr):
 
 def test_stop_without_start_is_safe(mgr):
     mgr.stop()  # should not raise
+
+
+# ------------------------------------------------------------------ robustness
+
+
+def test_busy_cleared_even_if_on_start_raises(mgr):
+    mgr.on_start.side_effect = RuntimeError("mic failed")
+    mgr._on_release(FN)
+    time.sleep(0.15)
+    assert mgr._busy is False
+    assert mgr._recording is False  # rolled back on exception
+
+
+def test_busy_cleared_even_if_on_stop_raises(mgr):
+    mgr._on_release(FN)
+    time.sleep(0.15)
+    mgr.on_stop.side_effect = RuntimeError("stop failed")
+    mgr._on_release(FN)
+    time.sleep(0.15)
+    assert mgr._busy is False
+
+
+def test_force_reset_clears_state(mgr):
+    mgr._on_release(FN)
+    time.sleep(0.05)
+    assert mgr._recording is True
+    mgr.force_reset()
+    assert mgr._recording is False
+    assert mgr._busy is False
+
+
+def test_rapid_taps_debounced(mgr):
+    # Two taps within debounce window — only first should register
+    mgr._on_release(FN)
+    mgr._on_release(FN)  # within 0.1s → ignored
+    time.sleep(0.05)
+    assert mgr.on_start.call_count == 1
+    assert mgr.on_stop.call_count == 0
