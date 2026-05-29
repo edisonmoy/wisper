@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install pytest pytest-benchmark ruff
+
+      - name: Install app dependencies (platform-safe subset)
+        # Skip AppKit-dependent packages — they only install on macOS.
+        # The postprocessor, config, history, and utils modules are clean.
+        run: pip install faster-whisper numpy
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Unit & integration tests
+        # Exclude tests that need AppKit, pynput hardware, or Apple Silicon MLX.
+        run: |
+          pytest -v \
+            tests/test_postprocessor.py \
+            tests/test_config.py \
+            tests/test_format_age.py \
+            tests/test_history.py \
+            -k "not AI and not benchmark_ai and not benchmark_report" \
+            --tb=short

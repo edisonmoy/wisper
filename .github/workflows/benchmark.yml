@@ -1,0 +1,32 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install pytest pytest-benchmark
+          pip install faster-whisper numpy
+
+      - name: Run benchmarks
+        run: |
+          pytest -v \
+            tests/test_postprocessor.py \
+            -k "benchmark_none or benchmark_regex" \
+            --benchmark-sort=mean \
+            --benchmark-columns=min,mean,max,stddev,rounds
+
+      - name: Print latency report
+        run: pytest -s tests/test_postprocessor.py -k "benchmark_report"
