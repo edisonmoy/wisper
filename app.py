@@ -95,8 +95,9 @@ class WisperApp(rumps.App):
         self.db = HistoryDB(APP_DIR / 'history.db')
         self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
-        # Flag set by background threads; consumed by main-thread timer.
+        # Flags set by background threads; consumed by main-thread _ui_tick.
         self._needs_history_refresh = False
+        self._pending_restore: list | None = None  # clipboard snapshot to restore
 
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
         self._update_state = None
@@ -196,6 +197,23 @@ class WisperApp(rumps.App):
             self._needs_history_refresh = False
             self._refresh_history()
         self._sync_update_item()
+        # Clipboard restore must happen on the main thread (NSPasteboard requirement).
+        if self._pending_restore is not None:
+            self._restore_clipboard(self._pending_restore)
+            self._pending_restore = None
+
+    def _restore_clipboard(self, saved_items: list):
+        pb = AppKit.NSPasteboard.generalPasteboard()
+        pb.clearContents()
+        ns_items = []
+        for saved_data in saved_items:
+            item = AppKit.NSPasteboardItem.new()
+            for ptype, raw in saved_data.items():
+                ns_data = AppKit.NSData.dataWithBytes_length_(raw, len(raw))
+                item.setData_forType_(ns_data, ptype)
+            ns_items.append(item)
+        if ns_items:
+            pb.writeObjects_(ns_items)
 
     def _sync_update_item(self):
         s = self._update_state
@@ -291,45 +309,30 @@ class WisperApp(rumps.App):
     # -------------------------------------------------------------- output
 
     def _paste(self, text: str):
-        # Prefer the Accessibility API: inserts text atomically at the cursor
-        # without touching the clipboard and without triggering autocorrect.
-        # Falls back to osascript keystroke for apps that don't support AX writes.
-        if not self._ax_insert(text):
-            self._keystroke_insert(text)
+        # Snapshot the full clipboard (all types, including images) as raw bytes.
+        # Reading NSPasteboard is safe from any thread; writing requires main thread,
+        # so the restore is deferred to _ui_tick via _pending_restore.
+        pb = AppKit.NSPasteboard.generalPasteboard()
+        saved_items = []
+        for item in (pb.pasteboardItems() or []):
+            saved_data = {}
+            for ptype in item.types():
+                data = item.dataForType_(ptype)
+                if data:
+                    saved_data[ptype] = bytes(data)
+            if saved_data:
+                saved_items.append(saved_data)
 
-    def _ax_insert(self, text: str) -> bool:
-        """Insert text via AXUIElement. Returns True on success."""
-        try:
-            from ApplicationServices import (
-                AXUIElementCopyAttributeValue,
-                AXUIElementCreateSystemWide,
-                AXUIElementSetAttributeValue,
-                kAXErrorSuccess,
-                kAXFocusedUIElementAttribute,
-                kAXSelectedTextAttribute,
-            )
-            system = AXUIElementCreateSystemWide()
-            err, focused = AXUIElementCopyAttributeValue(
-                system, kAXFocusedUIElementAttribute, None
-            )
-            if err != kAXErrorSuccess or focused is None:
-                return False
-            err = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute, text)
-            return err == kAXErrorSuccess
-        except Exception:
-            return False
+        # Write transcription and paste — both subprocess calls are synchronous,
+        # so the paste is complete before we set _pending_restore.
+        subprocess.run(['pbcopy'], input=text.encode(), check=True)
+        subprocess.run([
+            'osascript', '-e',
+            'tell application "System Events" to keystroke "v" using command down',
+        ])
 
-    def _keystroke_insert(self, text: str):
-        """Fallback: type text via System Events keystroke."""
-        lines = text.split('\n')
-        stmts = []
-        for i, line in enumerate(lines):
-            escaped = line.replace('\\', '\\\\').replace('"', '\\"')
-            stmts.append(f'keystroke "{escaped}"')
-            if i < len(lines) - 1:
-                stmts.append('key code 36')
-        script = 'tell application "System Events"\n' + '\n'.join(stmts) + '\nend tell'
-        subprocess.run(['osascript', '-e', script])
+        # Schedule clipboard restore on the main thread (next _ui_tick, ≤0.3s away).
+        self._pending_restore = saved_items
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
