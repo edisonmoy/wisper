@@ -7,6 +7,7 @@ APP_DIR = Path.home() / '.wisper'
 CONFIG_FILE = APP_DIR / 'config.json'
 
 MODELS = ['tiny.en', 'base.en', 'small.en', 'medium.en', 'distil-large-v3']
+CLEANUP_MODES = ['none', 'regex', 'ai']
 
 
 @dataclass
@@ -14,6 +15,7 @@ class Config:
     model: str = 'base.en'
     auto_paste: bool = True
     history_limit: int = 20
+    cleanup_mode: str = 'regex'
 
     @classmethod
     def load(cls) -> 'Config':
