@@ -31,14 +31,9 @@ The installer sets up a virtual environment, builds `Wisper.app`, and registers 
 
 ## Usage
 
-| Action | Result |
-|---|---|
-| Hold `fn` | Start recording |
-| Release `fn` | Transcribe + paste at cursor |
-| Click menu bar icon | Open menu |
-| History submenu | Recent transcriptions — click any to re-copy |
-| Model submenu | Switch Whisper models |
-| Text Cleanup submenu | Choose None / Basic / AI cleanup |
+Hold `fn` to record, release to transcribe. Text is pasted at your cursor instantly.
+
+Access history, model selection, and text cleanup from the menu bar icon.
 
 ---
 
