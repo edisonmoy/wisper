@@ -1,12 +1,14 @@
 import threading
+import time
 from typing import Callable
 
 from pynput import keyboard
 
 # macOS virtual key code for fn / Globe key (kVK_Function = 63).
-# pynput only fires release events for this key (NSFlagsChanged quirk),
-# so we use toggle mode: first tap starts recording, second tap stops it.
+# pynput fires on_release for NSFlagsChanged events (both press and release),
+# so we use toggle mode: first event starts recording, next stops it.
 _FN_VK = 63
+_DEBOUNCE_S = 0.1  # ignore duplicate events within this window
 
 
 def _is_fn(key) -> bool:
@@ -14,18 +16,23 @@ def _is_fn(key) -> bool:
 
 
 class HotkeyManager:
-    """Toggle recording on each fn key tap (tap once = start, tap again = stop)."""
+    """Toggle recording on each fn key event.
+
+    _busy blocks new toggles until the current on_start/on_stop callback
+    returns, preventing the flag from getting out of sync with the recorder
+    when the user taps fn faster than the callback can complete.
+    """
 
     def __init__(self, on_start: Callable, on_stop: Callable):
         self.on_start = on_start
         self.on_stop = on_stop
         self._listener: keyboard.Listener | None = None
         self._recording = False
+        self._busy = False
+        self._last_event = 0.0
 
     def start(self):
-        self._listener = keyboard.Listener(
-            on_release=self._on_release,
-        )
+        self._listener = keyboard.Listener(on_release=self._on_release)
         self._listener.daemon = True
         self._listener.start()
 
@@ -37,9 +44,24 @@ class HotkeyManager:
     def _on_release(self, key):
         if not _is_fn(key):
             return
+
+        now = time.monotonic()
+        if now - self._last_event < _DEBOUNCE_S:
+            return  # absorb duplicate/rapid-fire NSFlagsChanged events
+        if self._busy:
+            return  # previous toggle still in flight; ignore
+        self._last_event = now
+        self._busy = True
+
         if not self._recording:
             self._recording = True
-            threading.Thread(target=self.on_start, daemon=True).start()
+            def _run():
+                self.on_start()
+                self._busy = False
+            threading.Thread(target=_run, daemon=True).start()
         else:
             self._recording = False
-            threading.Thread(target=self.on_stop, daemon=True).start()
+            def _run():
+                self.on_stop()
+                self._busy = False
+            threading.Thread(target=_run, daemon=True).start()
