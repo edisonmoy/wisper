@@ -139,7 +139,7 @@ class WisperApp(rumps.App):
 
         self.cleanup_items: dict[str, rumps.MenuItem] = {}
         cleanup_menu = rumps.MenuItem('Text Cleanup')
-        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI (Apple Silicon)'}
+        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI — Polish & rewrite (Apple Silicon)'}
         for mode in CLEANUP_MODES:
             item = rumps.MenuItem(labels[mode], callback=lambda _, m=mode: self._set_cleanup(m))
             cleanup_menu[mode] = item
@@ -164,7 +164,7 @@ class WisperApp(rumps.App):
             item.title = ('✓ ' if m == self.config.model else '   ') + m
 
     def _sync_cleanup_checkmarks(self):
-        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI (Apple Silicon)'}
+        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI — Polish & rewrite (Apple Silicon)'}
         for mode, item in self.cleanup_items.items():
             item.title = ('✓ ' if mode == self.config.cleanup_mode else '   ') + labels[mode]
 

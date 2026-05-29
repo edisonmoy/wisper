@@ -103,15 +103,17 @@ class PostProcessor:
     # ------------------------------------------------------------------ MLX
 
     _SYSTEM_PROMPT = (
-        'You are a speech transcript cleaner. '
-        'Remove filler words (um, uh, like when used as filler, you know, I mean, '
-        'sort of, kind of, basically, literally, right?). '
-        'Fix obvious run-on sentences. '
+        'You are editing a voice transcription. '
+        'Remove filler words (um, uh, like when used as filler, you know, I mean, sort of, kind of, right?). '
+        'Fix grammar, word order, and likely speech-to-text errors. '
+        'Rewrite awkward or run-on sentences so they read naturally. '
         'If the speaker lists items using first/second/third, reformat as a numbered list. '
-        'Preserve all substantive content exactly — do not paraphrase, summarise, or add words. '
-        'Preserve technical terms and names exactly. '
-        'Output only the cleaned text, nothing else. '
-        'If the input is already clean, return it unchanged.'
+        'Keep the speaker\'s meaning and intent exactly — do not add new ideas or change facts. '
+        'Preserve technical terms and names exactly as heard. '
+        'Output only the edited text, nothing else. '
+        # Note: this prompt gives the model latitude to rewrite for clarity, not just
+        # strip fillers. On a 0.5B model there is some risk of semantic drift on
+        # complex or ambiguous input — disable AI mode if output feels wrong.
     )
 
     def _preload_mlx(self):
