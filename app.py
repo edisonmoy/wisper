@@ -291,16 +291,43 @@ class WisperApp(rumps.App):
     # -------------------------------------------------------------- output
 
     def _paste(self, text: str):
-        # Type the text directly at the cursor using System Events keystroke.
-        # This never touches the clipboard, so images and other clipboard
-        # contents are completely unaffected.
+        # Prefer the Accessibility API: inserts text atomically at the cursor
+        # without touching the clipboard and without triggering autocorrect.
+        # Falls back to osascript keystroke for apps that don't support AX writes.
+        if not self._ax_insert(text):
+            self._keystroke_insert(text)
+
+    def _ax_insert(self, text: str) -> bool:
+        """Insert text via AXUIElement. Returns True on success."""
+        try:
+            from ApplicationServices import (
+                AXUIElementCopyAttributeValue,
+                AXUIElementCreateSystemWide,
+                AXUIElementSetAttributeValue,
+                kAXErrorSuccess,
+                kAXFocusedUIElementAttribute,
+                kAXSelectedTextAttribute,
+            )
+            system = AXUIElementCreateSystemWide()
+            err, focused = AXUIElementCopyAttributeValue(
+                system, kAXFocusedUIElementAttribute, None
+            )
+            if err != kAXErrorSuccess or focused is None:
+                return False
+            err = AXUIElementSetAttributeValue(focused, kAXSelectedTextAttribute, text)
+            return err == kAXErrorSuccess
+        except Exception:
+            return False
+
+    def _keystroke_insert(self, text: str):
+        """Fallback: type text via System Events keystroke."""
         lines = text.split('\n')
         stmts = []
         for i, line in enumerate(lines):
             escaped = line.replace('\\', '\\\\').replace('"', '\\"')
             stmts.append(f'keystroke "{escaped}"')
             if i < len(lines) - 1:
-                stmts.append('key code 36')  # Return key between lines
+                stmts.append('key code 36')
         script = 'tell application "System Events"\n' + '\n'.join(stmts) + '\nend tell'
         subprocess.run(['osascript', '-e', script])
 
