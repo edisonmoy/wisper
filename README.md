@@ -92,16 +92,7 @@ echo 'export HF_HUB_OFFLINE=1' >> ~/.zshrc
 
 ## Updating
 
-```bash
-git pull
-bash install.sh
-```
-
-For code-only changes (no dependency updates), you can restart without reinstalling:
-
-```bash
-launchctl stop com.wisper.app && launchctl start com.wisper.app
-```
+Click the menu bar icon and select **Check for Updates**. Wisper will download and restart automatically.
 
 ---
 
