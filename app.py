@@ -17,10 +17,11 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
     AppKit.NSApplicationActivationPolicyProhibited
 )
 
-from config import APP_DIR, MODELS, REPO_DIR, Config
+from config import APP_DIR, CLEANUP_MODES, MODELS, REPO_DIR, Config
 from history import HistoryDB
 from hotkey import HotkeyManager
 from overlay import create_recording_overlay
+from postprocessor import PostProcessor
 from recorder import AudioRecorder
 from transcriber import Transcriber
 from updater import check_for_updates, install_update
@@ -75,6 +76,7 @@ class WisperApp(rumps.App):
 
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber(self.config.model)
+        self.postprocessor = PostProcessor(self.config)
         self.db = HistoryDB(APP_DIR / 'history.db')
         self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
@@ -118,6 +120,15 @@ class WisperApp(rumps.App):
             self.model_items[m] = item
         self._sync_model_checkmarks()
 
+        self.cleanup_items: dict[str, rumps.MenuItem] = {}
+        cleanup_menu = rumps.MenuItem('Text Cleanup')
+        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI (Apple Silicon)'}
+        for mode in CLEANUP_MODES:
+            item = rumps.MenuItem(labels[mode], callback=lambda _, m=mode: self._set_cleanup(m))
+            cleanup_menu[mode] = item
+            self.cleanup_items[mode] = item
+        self._sync_cleanup_checkmarks()
+
         self.update_item = rumps.MenuItem('Check for Updates', callback=self._update_action)
 
         self.menu = [
@@ -125,6 +136,7 @@ class WisperApp(rumps.App):
             None,
             self.history_menu,
             model_menu,
+            cleanup_menu,
             None,
             self.update_item,
             rumps.MenuItem('Quit Wisper', callback=self._quit),
@@ -133,6 +145,17 @@ class WisperApp(rumps.App):
     def _sync_model_checkmarks(self):
         for m, item in self.model_items.items():
             item.title = ('✓ ' if m == self.config.model else '   ') + m
+
+    def _sync_cleanup_checkmarks(self):
+        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI (Apple Silicon)'}
+        for mode, item in self.cleanup_items.items():
+            item.title = ('✓ ' if mode == self.config.cleanup_mode else '   ') + labels[mode]
+
+    def _set_cleanup(self, mode: str):
+        self.config.cleanup_mode = mode
+        self.config.save()
+        self.postprocessor.set_mode(mode)
+        self._sync_cleanup_checkmarks()
 
     def _configure_nsapp(self):
         """One-time deferred setup that requires the NSApp run loop to be running."""
@@ -244,6 +267,7 @@ class WisperApp(rumps.App):
         if not text:
             return
 
+        text = self.postprocessor.clean(text)
         self._paste(text)
         self.db.add(text, audio_ms=audio_ms, model=self.config.model, latency_ms=latency_ms)
         self._needs_history_refresh = True
@@ -251,48 +275,18 @@ class WisperApp(rumps.App):
     # -------------------------------------------------------------- output
 
     def _paste(self, text: str):
-        pb = AppKit.NSPasteboard.generalPasteboard()
-
-        # Snapshot every item — copy the raw bytes out so they survive clearContents().
-        saved_items = []
-        for item in (pb.pasteboardItems() or []):
-            saved_data = {}
-            for ptype in item.types():
-                data = item.dataForType_(ptype)
-                if data:
-                    # Convert to plain Python bytes to avoid any ObjC lifetime issues.
-                    saved_data[ptype] = bytes(data)
-            if saved_data:
-                saved_items.append(saved_data)
-
-        # Write the transcription as plain text so cmd-v inserts it.
-        pb.clearContents()
-        pb.setString_forType_(text, AppKit.NSPasteboardTypeString)
-
-        subprocess.run([
-            'osascript', '-e',
-            'tell application "System Events" to keystroke "v" using command down',
-        ])
-
-        def _restore():
-            pb.clearContents()
-            ns_items = []
-            for saved_data in saved_items:
-                new_item = AppKit.NSPasteboardItem.new()
-                for ptype, raw in saved_data.items():
-                    ns_data = AppKit.NSData.dataWithBytes_length_(raw, len(raw))
-                    new_item.setData_forType_(ns_data, ptype)
-                ns_items.append(new_item)
-            if ns_items:
-                pb.writeObjects_(ns_items)
-
-        # Dispatch restore onto the main queue after giving the paste keystroke
-        # time to be consumed. NSPasteboard writes must happen on the main thread.
-        def _schedule_restore():
-            import Foundation
-            Foundation.NSOperationQueue.mainQueue().addOperationWithBlock_(_restore)
-
-        threading.Timer(0.5, _schedule_restore).start()
+        # Type the text directly at the cursor using System Events keystroke.
+        # This never touches the clipboard, so images and other clipboard
+        # contents are completely unaffected.
+        lines = text.split('\n')
+        stmts = []
+        for i, line in enumerate(lines):
+            escaped = line.replace('\\', '\\\\').replace('"', '\\"')
+            stmts.append(f'keystroke "{escaped}"')
+            if i < len(lines) - 1:
+                stmts.append('key code 36')  # Return key between lines
+        script = 'tell application "System Events"\n' + '\n'.join(stmts) + '\nend tell'
+        subprocess.run(['osascript', '-e', script])
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
