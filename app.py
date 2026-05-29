@@ -98,6 +98,7 @@ class WisperApp(rumps.App):
         # Flags set by background threads; consumed by main-thread _ui_tick.
         self._needs_history_refresh = False
         self._pending_restore: list | None = None  # clipboard snapshot to restore
+        self._pasting = False  # blocks _ui_tick restore during pbcopy→cmd+v window
 
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
         self._update_state = None
@@ -198,7 +199,8 @@ class WisperApp(rumps.App):
             self._refresh_history()
         self._sync_update_item()
         # Clipboard restore must happen on the main thread (NSPasteboard requirement).
-        if self._pending_restore is not None:
+        # Skip if _pasting is True — the background thread is between pbcopy and cmd+v.
+        if self._pending_restore is not None and not self._pasting:
             self._restore_clipboard(self._pending_restore)
             self._pending_restore = None
 
@@ -323,16 +325,19 @@ class WisperApp(rumps.App):
             if saved_data:
                 saved_items.append(saved_data)
 
-        # Write transcription and paste — both subprocess calls are synchronous,
-        # so the paste is complete before we set _pending_restore.
+        # Guard the pbcopy→cmd+v window so _ui_tick won't restore a stale
+        # clipboard snapshot from a previous transcription in between them.
+        self._pasting = True
+        self._pending_restore = None  # discard any unprocessed previous restore
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
         subprocess.run([
             'osascript', '-e',
             'tell application "System Events" to keystroke "v" using command down',
         ])
-
-        # Schedule clipboard restore on the main thread (next _ui_tick, ≤0.3s away).
+        # Set restore payload before clearing the flag so _ui_tick always sees
+        # both fields in a consistent state (Python GIL makes each assignment atomic).
         self._pending_restore = saved_items
+        self._pasting = False
 
     def _recopy(self, text: str):
         subprocess.run(['pbcopy'], input=text.encode(), check=True)
