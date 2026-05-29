@@ -10,7 +10,7 @@ from AppKit import (
     NSScreen,
     NSView,
     NSVisualEffectView,
-    NSWindowCollectionBehaviorCanJoinAllSpaces,
+    NSWindowCollectionBehaviorMoveToActiveSpace,
 )
 from Foundation import NSMakeRect, NSTimer
 
@@ -31,7 +31,6 @@ _BLENDING_BEHIND = 0    # NSVisualEffectBlendingModeBehindWindow
 _STATE_ACTIVE = 1       # NSVisualEffectStateActive
 
 _FLOATING_LEVEL = 8     # NSFloatingWindowLevel
-_STATIONARY = 1 << 4    # NSWindowCollectionBehaviorStationary
 
 _PANEL_ALPHA = 0.82     # overall window opacity
 
@@ -119,7 +118,7 @@ class RecordingOverlay(NSObject):
         panel.setHasShadow_(True)
         panel.setIgnoresMouseEvents_(True)
         panel.setLevel_(_FLOATING_LEVEL)
-        panel.setCollectionBehavior_(NSWindowCollectionBehaviorCanJoinAllSpaces | _STATIONARY)
+        panel.setCollectionBehavior_(NSWindowCollectionBehaviorMoveToActiveSpace)
         panel.setAlphaValue_(_PANEL_ALPHA)
         # Force dark appearance so the HUD material renders near-black.
         panel.setAppearance_(NSAppearance.appearanceNamed_("NSAppearanceNameDarkAqua"))
