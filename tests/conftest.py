@@ -175,7 +175,10 @@ def _install_macos_mocks():
     rumps_mock = MagicMock()
     rumps_mock.App = _RumpsApp
     rumps_mock.MenuItem = _RumpsMenuItem
-    rumps_mock.Timer = MagicMock
+    # Use a factory so rumps.Timer(callback, interval) returns a fresh
+    # MagicMock() with no spec (passing MagicMock directly would use the
+    # callback as the spec, hiding attributes like .start).
+    rumps_mock.Timer = lambda *a, **kw: MagicMock()
     rumps_mock.notification = MagicMock()
     rumps_mock.quit_application = MagicMock()
 

@@ -40,7 +40,10 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit dependencies for known CVEs
-        run: pip-audit -r requirements.txt
+        # Exclude rumps: its transitive pyobjc dependency requires macOS to
+        # build (calls sw_vers) and cannot be resolved on Linux runners.
+        # The remaining packages (faster-whisper, numpy, pillow, etc.) are audited.
+        run: grep -Ev '^rumps' requirements.txt | pip-audit -r /dev/stdin
 
   test:
     runs-on: ubuntu-latest
