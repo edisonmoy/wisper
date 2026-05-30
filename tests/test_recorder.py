@@ -110,7 +110,10 @@ def test_start_while_already_recording_is_noop(recorder):
     chunk = np.ones((512, 1), dtype="float32")
     recorder._callback(chunk, 512, None, None)
     buffer_len = len(recorder._buffer)
-    recorder.start()  # should return early without touching the buffer
+    # sounddevice is imported at the top of start(); inject a mock so the
+    # import succeeds on Linux CI where sounddevice is not installed.
+    with _mock_sd(MagicMock()):
+        recorder.start()  # returns early because _recording is already True
     assert len(recorder._buffer) == buffer_len
 
 

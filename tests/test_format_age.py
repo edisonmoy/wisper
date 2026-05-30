@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 from utils import format_age
 
@@ -20,8 +21,15 @@ def test_59_minutes_ago():
 
 
 def test_today_shows_time_not_relative():
-    dt = datetime.now() - timedelta(hours=2)
-    result = format_age(_ts(dt))
+    # Use a fixed "now" (2:00 PM) so the test is not sensitive to when CI runs.
+    # Without this, runs between midnight and 2am would compute dt as yesterday,
+    # skipping the today branch and leaving utils.py:23 uncovered.
+    fixed_now = datetime(2024, 6, 15, 14, 0, 0)  # 2:00 PM
+    dt = fixed_now - timedelta(hours=2)  # noon, same day
+    with patch("utils.datetime") as mock_dt_cls:
+        mock_dt_cls.now.return_value = fixed_now
+        mock_dt_cls.strptime.side_effect = datetime.strptime
+        result = format_age(_ts(dt))
     assert "ago" not in result
     assert ":" in result  # time format like "2:30 PM"
 

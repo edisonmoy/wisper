@@ -93,6 +93,11 @@ def _install_macos_mocks():
     # NSObject base — must be a concrete Python class for subclassing.
     # ------------------------------------------------------------------
     class _FakeNSObject:
+        def __getattr__(self, name):
+            # Return a callable MagicMock for any AppKit selector not explicitly
+            # defined (e.g. setOpaque_, setNeedsDisplay_, contentView, …).
+            return MagicMock()
+
         @classmethod
         def alloc(cls):
             return cls.__new__(cls)

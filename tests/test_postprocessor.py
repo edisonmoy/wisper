@@ -231,8 +231,27 @@ def test_is_apple_silicon_false_on_non_darwin():
 
 
 def test_is_apple_silicon_false_on_subprocess_exception():
-    with patch("postprocessor.subprocess.run", side_effect=Exception("sysctl error")):
-        assert _is_apple_silicon() is False
+    # Must also patch platform.system; on Linux the function returns early at
+    # the platform check (line 73) and never reaches the subprocess block.
+    with patch("postprocessor.platform.system", return_value="Darwin"):
+        with patch("postprocessor.subprocess.run", side_effect=Exception("sysctl error")):
+            assert _is_apple_silicon() is False
+
+
+def test_is_apple_silicon_true_when_sysctl_returns_one():
+    mock_result = MagicMock()
+    mock_result.stdout = "1\n"
+    with patch("postprocessor.platform.system", return_value="Darwin"):
+        with patch("postprocessor.subprocess.run", return_value=mock_result):
+            assert _is_apple_silicon() is True
+
+
+def test_is_apple_silicon_false_when_sysctl_returns_zero():
+    mock_result = MagicMock()
+    mock_result.stdout = "0\n"
+    with patch("postprocessor.platform.system", return_value="Darwin"):
+        with patch("postprocessor.subprocess.run", return_value=mock_result):
+            assert _is_apple_silicon() is False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
