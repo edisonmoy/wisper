@@ -4,7 +4,7 @@ import numpy as np
 
 
 class Transcriber:
-    def __init__(self, model_name: str = 'base.en'):
+    def __init__(self, model_name: str = "base.en"):
         self.model_name = model_name
         self._model = None
         self._lock = threading.Lock()
@@ -16,16 +16,16 @@ class Transcriber:
     def transcribe(self, audio: np.ndarray) -> str:
         self._ensure_loaded()
         # .en models only understand English; multilingual models auto-detect.
-        language = 'en' if self.model_name.endswith('.en') else None
+        language = "en" if self.model_name.endswith(".en") else None
         segments, _ = self._model.transcribe(
             audio,
             language=language,
             beam_size=1,
             condition_on_previous_text=False,
             vad_filter=True,
-            vad_parameters={'min_silence_duration_ms': 300},
+            vad_parameters={"min_silence_duration_ms": 300},
         )
-        return ' '.join(seg.text for seg in segments).strip()
+        return " ".join(seg.text for seg in segments).strip()
 
     def set_model(self, model_name: str):
         with self._lock:
@@ -37,8 +37,9 @@ class Transcriber:
             if self._model is not None:
                 return
             from faster_whisper import WhisperModel
+
             self._model = WhisperModel(
                 self.model_name,
-                device='cpu',
-                compute_type='int8',
+                device="cpu",
+                compute_type="int8",
             )

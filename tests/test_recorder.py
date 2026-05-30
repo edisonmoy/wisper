@@ -104,8 +104,19 @@ def test_is_recording_property(recorder):
     assert recorder.is_recording is True
 
 
+def test_start_while_already_recording_is_noop(recorder):
+    """start() while already recording must not reset the buffer or re-open a stream."""
+    recorder._recording = True
+    chunk = np.ones((512, 1), dtype="float32")
+    recorder._callback(chunk, 512, None, None)
+    buffer_len = len(recorder._buffer)
+    recorder.start()  # should return early without touching the buffer
+    assert len(recorder._buffer) == buffer_len
+
+
 # ---------------------------------------------------------------------------
 # helper
+
 
 def _mock_sd(mock):
     """Inject a mock sounddevice into sys.modules for the duration of a with-block."""

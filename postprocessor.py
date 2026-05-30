@@ -3,28 +3,38 @@ import re
 import subprocess
 import threading
 
-_ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth',
-             'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+_ORDINALS = [
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+]
 
 # Matches "First, ..." or "First of all, ..." at start of a clause
 _ORDINAL_RE = re.compile(
-    r'(?<![a-z])(' + '|'.join(_ORDINALS) + r')(?:\s+of\s+all)?\s*[,.]?\s*',
+    r"(?<![a-z])(" + "|".join(_ORDINALS) + r")(?:\s+of\s+all)?\s*[,.]?\s*",
     re.IGNORECASE,
 )
 
 _FILLER_PATTERNS = [
     # Stutter: repeated word ("I I was" → "I was")
-    (re.compile(r'\b(\w+) \1\b', re.IGNORECASE), r'\1'),
+    (re.compile(r"\b(\w+) \1\b", re.IGNORECASE), r"\1"),
     # um / uh variants optionally followed by comma
-    (re.compile(r'\b(um+|uh+)[,]?\s+', re.IGNORECASE), ' '),
+    (re.compile(r"\b(um+|uh+)[,]?\s+", re.IGNORECASE), " "),
     # "you know" guarded by surrounding commas/boundaries
-    (re.compile(r'[,]?\s*\byou know\b[,]?\s*', re.IGNORECASE), ' '),
+    (re.compile(r"[,]?\s*\byou know\b[,]?\s*", re.IGNORECASE), " "),
     # "I mean" only when preceded by a comma (safer)
-    (re.compile(r',\s*I mean[,]?\s*', re.IGNORECASE), ', '),
+    (re.compile(r",\s*I mean[,]?\s*", re.IGNORECASE), ", "),
     # "right?" at end of clause
-    (re.compile(r',?\s*\bright\?\s*', re.IGNORECASE), ''),
+    (re.compile(r",?\s*\bright\?\s*", re.IGNORECASE), ""),
     # Collapse multiple spaces
-    (re.compile(r' {2,}'), ' '),
+    (re.compile(r" {2,}"), " "),
 ]
 
 
@@ -39,7 +49,7 @@ def _detect_list(text: str) -> str:
     """Convert 'First ... Second ... Third ...' into a numbered list."""
     found = [(m.start(), m.group(1).lower(), m.end()) for m in _ORDINAL_RE.finditer(text)]
     # Only reformat when 3+ sequential ordinals appear
-    sequential = [f for f in found if f[1] in _ORDINALS[:len(found)]]
+    sequential = [f for f in found if f[1] in _ORDINALS[: len(found)]]
     if len(sequential) < 3:
         return text
 
@@ -52,22 +62,24 @@ def _detect_list(text: str) -> str:
                 parts.append(prefix)
         # Grab content up to next ordinal or end of string
         next_start = sequential[i + 1][0] if i + 1 < len(sequential) else len(text)
-        content = text[end:next_start].strip().rstrip(',.')
-        parts.append(f'{i + 1}. {content}')
+        content = text[end:next_start].strip().rstrip(",.")
+        parts.append(f"{i + 1}. {content}")
         prev_end = next_start
 
-    return '\n'.join(parts)
+    return "\n".join(parts)
 
 
 def _is_apple_silicon() -> bool:
-    if platform.system() != 'Darwin':
+    if platform.system() != "Darwin":
         return False
     try:
         result = subprocess.run(
-            ['sysctl', '-n', 'hw.optional.arm64'],
-            capture_output=True, text=True, timeout=2,
+            ["sysctl", "-n", "hw.optional.arm64"],
+            capture_output=True,
+            text=True,
+            timeout=2,
         )
-        return result.stdout.strip() == '1'
+        return result.stdout.strip() == "1"
     except Exception:
         return False
 
@@ -80,22 +92,22 @@ class PostProcessor:
         self._mlx_lock = threading.Lock()
         self._apple_silicon = _is_apple_silicon()
 
-        if self._mode == 'ai' and self._apple_silicon:
+        if self._mode == "ai" and self._apple_silicon:
             threading.Thread(target=self._preload_mlx, daemon=True).start()
 
     def set_mode(self, mode: str):
         self._mode = mode
-        if mode == 'ai' and self._apple_silicon:
+        if mode == "ai" and self._apple_silicon:
             threading.Thread(target=self._preload_mlx, daemon=True).start()
 
     def clean(self, text: str) -> str:
-        if self._mode == 'none':
+        if self._mode == "none":
             return text
 
         text = _apply_regex(text)
         text = _detect_list(text)
 
-        if self._mode == 'ai' and self._apple_silicon:
+        if self._mode == "ai" and self._apple_silicon:
             text = self._apply_mlx(text)
 
         return text
@@ -103,14 +115,14 @@ class PostProcessor:
     # ------------------------------------------------------------------ MLX
 
     _SYSTEM_PROMPT = (
-        'You are editing a voice transcription. '
-        'Remove filler words (um, uh, like when used as filler, you know, I mean, sort of, kind of, right?). '
-        'Fix grammar, word order, and likely speech-to-text errors. '
-        'Rewrite awkward or run-on sentences so they read naturally. '
-        'If the speaker lists items using first/second/third, reformat as a numbered list. '
-        'Keep the speaker\'s meaning and intent exactly — do not add new ideas or change facts. '
-        'Preserve technical terms and names exactly as heard. '
-        'Output only the edited text, nothing else. '
+        "You are editing a voice transcription. "
+        "Remove filler words (um, uh, like when used as filler, you know, I mean, sort of, kind of, right?). "  # noqa: E501
+        "Fix grammar, word order, and likely speech-to-text errors. "
+        "Rewrite awkward or run-on sentences so they read naturally. "
+        "If the speaker lists items using first/second/third, reformat as a numbered list. "
+        "Keep the speaker's meaning and intent exactly — do not add new ideas or change facts. "
+        "Preserve technical terms and names exactly as heard. "
+        "Output only the edited text, nothing else. "
         # Note: this prompt gives the model latitude to rewrite for clarity, not just
         # strip fillers. On a 0.5B model there is some risk of semantic drift on
         # complex or ambiguous input — disable AI mode if output feels wrong.
@@ -122,7 +134,8 @@ class PostProcessor:
                 return
             try:
                 from mlx_lm import load
-                model, tokenizer = load('mlx-community/Qwen2.5-0.5B-Instruct-4bit')
+
+                model, tokenizer = load("mlx-community/Qwen2.5-0.5B-Instruct-4bit")
                 self._mlx_model = model
                 self._mlx_tokenizer = tokenizer
             except Exception:
@@ -134,15 +147,19 @@ class PostProcessor:
                 return text
             try:
                 from mlx_lm import generate
+
                 messages = [
-                    {'role': 'system', 'content': self._SYSTEM_PROMPT},
-                    {'role': 'user', 'content': text},
+                    {"role": "system", "content": self._SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
                 ]
                 prompt = self._mlx_tokenizer.apply_chat_template(
-                    messages, add_generation_prompt=True, tokenize=False,
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=False,
                 )
                 result = generate(
-                    self._mlx_model, self._mlx_tokenizer,
+                    self._mlx_model,
+                    self._mlx_tokenizer,
                     prompt=prompt,
                     max_tokens=512,
                     temp=0.0,

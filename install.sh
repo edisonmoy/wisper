@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLIST="$HOME/Library/LaunchAgents/com.wisper.app.plist"
@@ -58,6 +58,14 @@ echo "Wisper.app bundle built at $APP_BUNDLE"
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/.wisper"
 
+# XML-escape a string for safe embedding in a plist value.
+xml_escape() {
+    printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+}
+
+LAUNCHER_ESC="$(xml_escape "$LAUNCHER")"
+LOG_PATH_ESC="$(xml_escape "$HOME/.wisper/wisper.log")"
+
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -68,28 +76,33 @@ cat > "$PLIST" <<EOF
   <string>com.wisper.app</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$LAUNCHER</string>
+    <string>${LAUNCHER_ESC}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>StandardErrorPath</key>
-  <string>$HOME/.wisper/wisper.log</string>
+  <string>${LOG_PATH_ESC}</string>
   <key>StandardOutPath</key>
-  <string>$HOME/.wisper/wisper.log</string>
+  <string>${LOG_PATH_ESC}</string>
 </dict>
 </plist>
 EOF
 
 # ---------------------------------------------------------------------------
-# 5. Load launchd plist
+# 5. Remove macOS quarantine bit (set by browsers/downloads; blocks unsigned apps)
+# ---------------------------------------------------------------------------
+xattr -rd com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 6. Load launchd plist
 # ---------------------------------------------------------------------------
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
 # ---------------------------------------------------------------------------
-# 6. Setup instructions
+# 7. Setup instructions
 # ---------------------------------------------------------------------------
 echo ""
 echo "Wisper installed and running."

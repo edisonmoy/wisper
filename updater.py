@@ -1,10 +1,14 @@
 import subprocess
 from pathlib import Path
 
+# Guard against a compromised or redirected git remote.  Only HTTPS GitHub
+# URLs are considered trustworthy for auto-install.
+_TRUSTED_REMOTE_HOST = "github.com"
+
 
 def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ['git'] + args,
+        ["git"] + args,
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -12,12 +16,21 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _remote_is_trusted(repo_dir: Path) -> bool:
+    """Return True only if origin resolves to a github.com URL."""
+    r = _git(["remote", "get-url", "origin"], repo_dir)
+    if r.returncode != 0:
+        return False
+    url = r.stdout.strip()
+    return _TRUSTED_REMOTE_HOST in url
+
+
 def check_for_updates(repo_dir: Path) -> int:
     """Fetch origin/main and return number of new commits. -1 on error."""
     try:
-        if _git(['fetch', 'origin', 'main'], repo_dir).returncode != 0:
+        if _git(["fetch", "origin", "main"], repo_dir).returncode != 0:
             return -1
-        r = _git(['rev-list', 'HEAD..origin/main', '--count'], repo_dir)
+        r = _git(["rev-list", "HEAD..origin/main", "--count"], repo_dir)
         if r.returncode != 0:
             return -1
         return int(r.stdout.strip())
@@ -28,12 +41,14 @@ def check_for_updates(repo_dir: Path) -> int:
 def install_update(repo_dir: Path) -> bool:
     """Pull latest code and sync venv deps. Returns True on success."""
     try:
-        if _git(['pull', 'origin', 'main'], repo_dir).returncode != 0:
+        if not _remote_is_trusted(repo_dir):
             return False
-        pip = repo_dir / '.venv' / 'bin' / 'pip'
+        if _git(["pull", "origin", "main"], repo_dir).returncode != 0:
+            return False
+        pip = repo_dir / ".venv" / "bin" / "pip"
         if pip.exists():
             subprocess.run(
-                [str(pip), 'install', '-q', '-r', str(repo_dir / 'requirements.txt')],
+                [str(pip), "install", "-q", "-r", str(repo_dir / "requirements.txt")],
                 timeout=120,
                 check=False,
             )

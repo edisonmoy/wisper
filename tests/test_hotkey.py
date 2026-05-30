@@ -142,3 +142,12 @@ def test_rapid_taps_debounced(mgr):
     time.sleep(0.05)
     assert mgr.on_start.call_count == 1
     assert mgr.on_stop.call_count == 0
+
+
+def test_busy_flag_blocks_release(mgr):
+    """_on_release is a no-op when _busy is True (previous toggle still in flight)."""
+    mgr._busy = True
+    mgr._last_event = 0.0  # old enough that debounce would not fire
+    mgr._on_release(FN)
+    time.sleep(0.05)
+    mgr.on_start.assert_not_called()

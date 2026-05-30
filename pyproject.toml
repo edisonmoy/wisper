@@ -21,3 +21,23 @@ pythonpath = ["."]
 markers = [
     "benchmark: performance benchmarks (use pytest-benchmark for detailed stats)",
 ]
+
+[tool.coverage.run]
+branch = true
+concurrency = ["thread"]
+source = ["."]
+omit = [
+    "tests/*",
+    "*/site-packages/*",
+    "make_icon.py",
+    ".venv/*",
+]
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "def run\\(self\\):",           # rumps mock run() stub
+]

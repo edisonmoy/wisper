@@ -27,22 +27,22 @@ OUTPUT_ICNS = os.path.join(ASSETS_DIR, "wisper.icns")
 
 # Iconset sizes: (icon_size, scale) -> filename
 ICONSET_SIZES = [
-    (16,   1, "icon_16x16.png"),
-    (16,   2, "icon_16x16@2x.png"),
-    (32,   1, "icon_32x32.png"),
-    (32,   2, "icon_32x32@2x.png"),
-    (128,  1, "icon_128x128.png"),
-    (128,  2, "icon_128x128@2x.png"),
-    (256,  1, "icon_256x256.png"),
-    (256,  2, "icon_256x256@2x.png"),
-    (512,  1, "icon_512x512.png"),
-    (512,  2, "icon_512x512@2x.png"),
+    (16, 1, "icon_16x16.png"),
+    (16, 2, "icon_16x16@2x.png"),
+    (32, 1, "icon_32x32.png"),
+    (32, 2, "icon_32x32@2x.png"),
+    (128, 1, "icon_128x128.png"),
+    (128, 2, "icon_128x128@2x.png"),
+    (256, 1, "icon_256x256.png"),
+    (256, 2, "icon_256x256@2x.png"),
+    (512, 1, "icon_512x512.png"),
+    (512, 2, "icon_512x512@2x.png"),
 ]
 
 APPLE_EMOJI_FONT = "/System/Library/Fonts/Apple Color Emoji.ttc"
-BG_COLOR = (37, 99, 235, 255)   # #2563EB fully opaque
+BG_COLOR = (37, 99, 235, 255)  # #2563EB fully opaque
 CANVAS_SIZE = 1024
-EMOJI = "\U0001f3a4"            # microphone emoji
+EMOJI = "\U0001f3a4"  # microphone emoji
 
 
 def make_base_image() -> Image.Image:
@@ -110,9 +110,7 @@ def main() -> None:
 
         # iconutil is macOS-only; check for it
         if shutil.which("iconutil") is None:
-            print(
-                "ERROR: `iconutil` not found. This script must run on macOS."
-            )
+            print("ERROR: `iconutil` not found. This script must run on macOS.")
             sys.exit(1)
 
         print("Running iconutil…")

@@ -7,6 +7,41 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
+
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit dependencies for known CVEs
+        run: pip-audit -r requirements.txt
+
   test:
     runs-on: ubuntu-latest
 
@@ -19,23 +54,37 @@ jobs:
           cache: pip
 
       - name: Install dev dependencies
-        run: pip install pytest pytest-benchmark ruff
+        run: pip install pytest pytest-benchmark pytest-cov ruff
 
       - name: Install app dependencies (platform-safe subset)
         # Skip AppKit-dependent packages — they only install on macOS.
-        # The postprocessor, config, history, and utils modules are clean.
+        # AppKit / rumps / objc / setproctitle are stubbed by conftest.py.
         run: pip install faster-whisper numpy
 
-      - name: Lint
-        run: ruff check .
-
-      - name: Unit & integration tests
-        # Exclude tests that need AppKit, pynput hardware, or Apple Silicon MLX.
+      - name: Run all tests with branch coverage
         run: |
           pytest -v \
             tests/test_postprocessor.py \
             tests/test_config.py \
             tests/test_format_age.py \
             tests/test_history.py \
-            -k "not AI and not benchmark_ai and not benchmark_report" \
-            --tb=short
+            tests/test_updater.py \
+            tests/test_hotkey.py \
+            tests/test_recorder.py \
+            tests/test_transcriber.py \
+            tests/test_app.py \
+            tests/test_overlay.py \
+            -k "not TestPostProcessorAI and not benchmark_ai and not benchmark_report" \
+            --tb=short \
+            --cov=. \
+            --cov-branch \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=100
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml

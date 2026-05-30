@@ -5,7 +5,7 @@ import numpy as np
 
 SAMPLE_RATE = 16_000  # Hz — what Whisper expects
 CHANNELS = 1
-DTYPE = 'float32'
+DTYPE = "float32"
 
 WAVEFORM_BARS = 44  # RMS history length shown in the overlay
 
@@ -61,7 +61,7 @@ class AudioRecorder:
     def _callback(self, indata, frames, time_info, status):
         if self._recording:
             self._buffer.append(indata.copy())
-            rms = float(np.sqrt(np.mean(indata ** 2)))
+            rms = float(np.sqrt(np.mean(indata**2)))
             self._waveform.append(rms)
 
     def duration_ms(self) -> int:

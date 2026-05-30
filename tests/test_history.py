@@ -73,3 +73,29 @@ def test_result_has_all_fields(db):
     db.add("test", audio_ms=500, model="tiny.en", latency_ms=100)
     item = db.get_recent()[0]
     assert {"id", "text", "model", "latency_ms", "created_at"} <= item.keys()
+
+
+def test_migration_adds_missing_columns(tmp_path):
+    """Opening an old-schema DB (no model/latency_ms columns) triggers ALTER TABLE."""
+    import sqlite3
+
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        CREATE TABLE history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            audio_ms INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now', 'localtime'))
+        )
+    """)
+    conn.execute("INSERT INTO history (text, audio_ms) VALUES ('hello', 500)")
+    conn.commit()
+    conn.close()
+
+    db = HistoryDB(db_path)
+    items = db.get_recent()
+    assert len(items) == 1
+    assert items[0]["text"] == "hello"
+    assert items[0]["model"] == ""
+    assert items[0]["latency_ms"] == 0

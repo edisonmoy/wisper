@@ -48,3 +48,18 @@ def test_load_corrupt_file(tmp_path, monkeypatch):
 
 def test_repo_dir_is_project_root():
     assert (config_module.REPO_DIR / "app.py").exists()
+
+
+def test_post_init_corrects_invalid_model():
+    cfg = Config(model="gpt-4-invalid")
+    assert cfg.model == "base.en"
+
+
+def test_post_init_corrects_invalid_cleanup_mode():
+    cfg = Config(cleanup_mode="bad-mode")
+    assert cfg.cleanup_mode == "regex"
+
+
+def test_post_init_corrects_out_of_range_history_limit():
+    cfg = Config(history_limit=999)
+    assert cfg.history_limit == 20

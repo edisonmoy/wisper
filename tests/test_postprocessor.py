@@ -9,16 +9,19 @@ E2E         – PostProcessor.clean() with mode='ai' (skipped if MLX unavailable
 Benchmark   – timing for all three modes across a fixture corpus
 """
 
+import sys
 import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from postprocessor import PostProcessor, _apply_regex, _detect_list
 from config import Config
+from postprocessor import PostProcessor, _apply_regex, _detect_list, _is_apple_silicon
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def _cfg(**kwargs) -> Config:
     c = Config()
@@ -34,6 +37,7 @@ def _pp(mode: str) -> PostProcessor:
 # ══════════════════════════════════════════════════════════════════════════════
 # Unit – _apply_regex
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestApplyRegex:
     # ── filler removal ───────────────────────────────────────────────────────
@@ -120,6 +124,7 @@ class TestApplyRegex:
 # Unit – _detect_list
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestDetectList:
     def test_three_ordinals_reformatted(self):
         text = "First, open the app. Second, record something. Third, paste it."
@@ -134,9 +139,7 @@ class TestDetectList:
         assert "1." not in result
 
     def test_four_ordinals(self):
-        result = _detect_list(
-            "First, do A. Second, do B. Third, do C. Fourth, do D."
-        )
+        result = _detect_list("First, do A. Second, do B. Third, do C. Fourth, do D.")
         assert "4." in result
 
     def test_ordinals_case_insensitive(self):
@@ -151,51 +154,65 @@ class TestDetectList:
         result = _detect_list("First, A. Second, B. Third, C.")
         assert "\n" in result
 
+    def test_prefix_text_before_first_ordinal_is_preserved(self):
+        """Text that appears before the first ordinal is kept as a prefix line."""
+        text = "Here is my plan: First, do A. Second, do B. Third, do C."
+        result = _detect_list(text)
+        assert "1." in result
+        assert "Here is my plan" in result
+
+    def test_whitespace_only_prefix_before_first_ordinal_is_dropped(self):
+        """Only-whitespace text before the first ordinal is stripped and not emitted."""
+        text = "  First, do A. Second, do B. Third, do C."
+        result = _detect_list(text)
+        assert "1." in result
+        # No blank leading line — the empty prefix is silently dropped
+        assert not result.startswith("\n")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Integration – PostProcessor with mode='none' and mode='regex'
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestPostProcessorNone:
     def test_returns_raw_text(self):
-        pp = _pp('none')
+        pp = _pp("none")
         raw = "Um, so like, I was thinking about it."
         assert pp.clean(raw) == raw
 
     def test_empty_string(self):
-        assert _pp('none').clean("") == ""
+        assert _pp("none").clean("") == ""
 
 
 class TestPostProcessorRegex:
     def test_strips_fillers(self):
-        pp = _pp('regex')
+        pp = _pp("regex")
         result = pp.clean("Um, so I was thinking")
         assert "Um" not in result
         assert "thinking" in result
 
     def test_stutter_removed(self):
-        result = _pp('regex').clean("I I need to do this")
+        result = _pp("regex").clean("I I need to do this")
         assert result.count("I ") <= 1
 
     def test_list_detected(self):
-        result = _pp('regex').clean(
-            "First, open the app. Second, record. Third, paste."
-        )
+        result = _pp("regex").clean("First, open the app. Second, record. Third, paste.")
         assert "1." in result
 
     def test_clean_input_passthrough(self):
         text = "The meeting is at three o'clock."
-        assert _pp('regex').clean(text) == text
+        assert _pp("regex").clean(text) == text
 
     def test_mode_none_vs_regex_differ_on_filler(self):
         text = "Um, yeah, I think so."
-        assert _pp('none').clean(text) != _pp('regex').clean(text)
+        assert _pp("none").clean(text) != _pp("regex").clean(text)
 
     def test_set_mode_switches_behaviour(self):
-        pp = _pp('none')
+        pp = _pp("none")
         raw = "Um, yeah."
         assert pp.clean(raw) == raw
-        pp.set_mode('regex')
+        pp.set_mode("regex")
         assert pp.clean(raw) != raw
 
 
@@ -203,10 +220,150 @@ class TestPostProcessorRegex:
 # E2E – PostProcessor with mode='ai'  (requires MLX + Apple Silicon)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Unit – _is_apple_silicon
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def test_is_apple_silicon_false_on_non_darwin():
+    with patch("postprocessor.platform.system", return_value="Linux"):
+        assert _is_apple_silicon() is False
+
+
+def test_is_apple_silicon_false_on_subprocess_exception():
+    with patch("postprocessor.subprocess.run", side_effect=Exception("sysctl error")):
+        assert _is_apple_silicon() is False
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Unit – PostProcessor MLX / AI paths  (mocked Apple Silicon + mlx_lm)
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _make_mlx_mock():
+    """Return a fake mlx_lm module with controllable load/generate."""
+    mock_mlx = MagicMock()
+    mock_model = MagicMock()
+    mock_tokenizer = MagicMock()
+    mock_mlx.load.return_value = (mock_model, mock_tokenizer)
+    mock_mlx.generate.return_value = "cleaned text"
+    mock_tokenizer.apply_chat_template.return_value = "prompt"
+    return mock_mlx, mock_model, mock_tokenizer
+
+
+class TestPostProcessorMLX:
+    """Test PostProcessor on mocked Apple Silicon with a mocked mlx_lm."""
+
+    def test_init_ai_mode_starts_preload_thread(self):
+        mock_mlx, _, _ = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=True):
+                with patch("postprocessor.threading.Thread") as mock_thread:
+                    PostProcessor(_cfg(cleanup_mode="ai"))
+        mock_thread.assert_called_once()
+
+    def test_set_mode_ai_starts_preload_thread(self):
+        mock_mlx, _, _ = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=True):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+                with patch("postprocessor.threading.Thread") as mock_thread:
+                    pp.set_mode("ai")
+        mock_thread.assert_called_once()
+
+    def test_clean_ai_invokes_apply_mlx(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=True):
+                pp = PostProcessor(_cfg(cleanup_mode="ai"))
+                pp._mlx_model = mock_model
+                pp._mlx_tokenizer = mock_tokenizer
+                mock_mlx.generate.return_value = "cleaned"
+                result = pp.clean("raw text")
+        assert result == "cleaned"
+
+    def test_preload_mlx_stores_model_and_tokenizer(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._preload_mlx()
+        assert pp._mlx_model is mock_model
+        assert pp._mlx_tokenizer is mock_tokenizer
+
+    def test_preload_mlx_idempotent(self):
+        mock_mlx, mock_model, _ = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._mlx_model = mock_model  # already loaded
+            pp._preload_mlx()  # should return early without calling load again
+        mock_mlx.load.assert_not_called()
+
+    def test_preload_mlx_handles_import_error(self):
+        with patch("postprocessor._is_apple_silicon", return_value=False):
+            pp = PostProcessor(_cfg(cleanup_mode="none"))
+        with patch.dict(sys.modules, {"mlx_lm": None}):
+            pp._preload_mlx()  # ImportError caught silently
+        assert pp._mlx_model is None
+
+    def test_apply_mlx_returns_original_when_model_not_loaded(self):
+        with patch("postprocessor._is_apple_silicon", return_value=False):
+            pp = PostProcessor(_cfg(cleanup_mode="none"))
+        result = pp._apply_mlx("hello")
+        assert result == "hello"
+
+    def test_apply_mlx_returns_cleaned_text(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._mlx_model = mock_model
+            pp._mlx_tokenizer = mock_tokenizer
+            mock_mlx.generate.return_value = "cleaned"
+            result = pp._apply_mlx("raw text")
+        assert result == "cleaned"
+
+    def test_apply_mlx_discards_runaway_output(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._mlx_model = mock_model
+            pp._mlx_tokenizer = mock_tokenizer
+            mock_mlx.generate.return_value = "x" * 1000  # way longer than input
+            result = pp._apply_mlx("short")
+        assert result == "short"
+
+    def test_apply_mlx_discards_too_short_output(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._mlx_model = mock_model
+            pp._mlx_tokenizer = mock_tokenizer
+            mock_mlx.generate.return_value = "x"  # only 1 char after strip
+            result = pp._apply_mlx("normal text here")
+        assert result == "normal text here"
+
+    def test_apply_mlx_handles_exception(self):
+        mock_mlx, mock_model, mock_tokenizer = _make_mlx_mock()
+        with patch.dict(sys.modules, {"mlx_lm": mock_mlx}):
+            with patch("postprocessor._is_apple_silicon", return_value=False):
+                pp = PostProcessor(_cfg(cleanup_mode="none"))
+            pp._mlx_model = mock_model
+            pp._mlx_tokenizer = mock_tokenizer
+            mock_mlx.generate.side_effect = RuntimeError("GPU error")
+            result = pp._apply_mlx("hello")
+        assert result == "hello"
+
+
 def _mlx_available() -> bool:
     try:
         import mlx_lm  # noqa: F401
+
         from postprocessor import _is_apple_silicon
+
         return _is_apple_silicon()
     except ImportError:
         return False
@@ -218,7 +375,7 @@ class TestPostProcessorAI:
 
     @pytest.fixture(scope="class")
     def pp(self):
-        p = _pp('ai')
+        p = _pp("ai")
         # Wait for preload
         deadline = time.monotonic() + 30
         while p._mlx_model is None and time.monotonic() < deadline:
@@ -269,14 +426,14 @@ class TestPostProcessorAI:
 
 # A small corpus representative of real dictation — mix of lengths and filler density
 BENCHMARK_CORPUS = [
-    "Um, so I was thinking about the, uh, quarterly report and like I think we need to, you know, restructure it.",
+    "Um, so I was thinking about the, uh, quarterly report and like I think we need to, you know, restructure it.",  # noqa: E501
     "The meeting is scheduled for three pm tomorrow in the main conference room.",
     "First, we need to update the dependencies. Second, run the tests. Third, deploy to staging.",
-    "I I need to uh call Sarah about the project deadline because she mentioned, you know, that it might slip.",
-    "Okay so basically the issue is that the API is returning a 500 error and I mean we need to fix it before launch.",
+    "I I need to uh call Sarah about the project deadline because she mentioned, you know, that it might slip.",  # noqa: E501
+    "Okay so basically the issue is that the API is returning a 500 error and I mean we need to fix it before launch.",  # noqa: E501
     "Can you um remind me to send the invoice to the client by end of day?",
     "The quick brown fox jumps over the lazy dog.",
-    "So like right now the feature is sort of working but there are edge cases that we literally haven't tested.",
+    "So like right now the feature is sort of working but there are edge cases that we literally haven't tested.",  # noqa: E501
 ]
 
 RUNS = 5  # average over this many runs per mode
@@ -286,14 +443,14 @@ def _benchmark_mode(mode: str) -> dict:
     pp = _pp(mode)
 
     # If AI mode, wait for model to load (or skip)
-    if mode == 'ai':
+    if mode == "ai":
         if not _mlx_available():
-            return {'mode': mode, 'skipped': True}
+            return {"mode": mode, "skipped": True}
         deadline = time.monotonic() + 30
         while pp._mlx_model is None and time.monotonic() < deadline:
             time.sleep(0.5)
         if pp._mlx_model is None:
-            return {'mode': mode, 'skipped': True}
+            return {"mode": mode, "skipped": True}
 
     times = []
     for _ in range(RUNS):
@@ -303,24 +460,24 @@ def _benchmark_mode(mode: str) -> dict:
         times.append((time.monotonic() - t0) / len(BENCHMARK_CORPUS) * 1000)
 
     return {
-        'mode': mode,
-        'skipped': False,
-        'mean_ms': round(sum(times) / len(times), 2),
-        'min_ms': round(min(times), 2),
-        'max_ms': round(max(times), 2),
+        "mode": mode,
+        "skipped": False,
+        "mean_ms": round(sum(times) / len(times), 2),
+        "min_ms": round(min(times), 2),
+        "max_ms": round(max(times), 2),
     }
 
 
 @pytest.mark.benchmark
 def test_benchmark_none(benchmark):
-    pp = _pp('none')
+    pp = _pp("none")
     result = benchmark(lambda: [pp.clean(t) for t in BENCHMARK_CORPUS])
     assert result  # ensure something was produced
 
 
 @pytest.mark.benchmark
 def test_benchmark_regex(benchmark):
-    pp = _pp('regex')
+    pp = _pp("regex")
     result = benchmark(lambda: [pp.clean(t) for t in BENCHMARK_CORPUS])
     assert result
 
@@ -328,7 +485,7 @@ def test_benchmark_regex(benchmark):
 @pytest.mark.benchmark
 @pytest.mark.skipif(not _mlx_available(), reason="MLX / Apple Silicon not available")
 def test_benchmark_ai(benchmark):
-    pp = _pp('ai')
+    pp = _pp("ai")
     deadline = time.monotonic() + 30
     while pp._mlx_model is None and time.monotonic() < deadline:
         time.sleep(0.5)
@@ -341,7 +498,7 @@ def test_benchmark_ai(benchmark):
 def test_benchmark_report(capsys):
     """Standalone benchmark that prints a human-readable latency table."""
     results = []
-    for mode in ('none', 'regex', 'ai'):
+    for mode in ("none", "regex", "ai"):
         results.append(_benchmark_mode(mode))
 
     with capsys.disabled():
@@ -352,9 +509,11 @@ def test_benchmark_report(capsys):
         print("│ Mode         │ Mean (ms)    │ Min (ms)     │ Max    │")
         print("├──────────────┼──────────────┼──────────────┼────────┤")
         for r in results:
-            if r.get('skipped'):
+            if r.get("skipped"):
                 print(f"│ {r['mode']:<12} │ {'skipped':<12} │ {'—':<12} │ {'—':<6} │")
             else:
-                print(f"│ {r['mode']:<12} │ {r['mean_ms']:<12} │ {r['min_ms']:<12} │ {r['max_ms']:<6} │")
+                print(
+                    f"│ {r['mode']:<12} │ {r['mean_ms']:<12} │ {r['min_ms']:<12} │ {r['max_ms']:<6} │"  # noqa: E501
+                )
         print("└──────────────┴──────────────┴──────────────┴────────┘")
         print(f"  Corpus: {len(BENCHMARK_CORPUS)} samples × {RUNS} runs\n")

@@ -1,3 +1,5 @@
+import logging
+import logging.handlers
 import os
 import subprocess
 import threading
@@ -8,7 +10,7 @@ import objc
 import rumps
 import setproctitle
 
-setproctitle.setproctitle('Wisper')
+setproctitle.setproctitle("Wisper")
 
 # Hide from Dock. Must be set before rumps touches NSApplication.
 # The Info.plist LSUIElement key is ignored because NSBundle.mainBundle()
@@ -27,7 +29,10 @@ from transcriber import Transcriber
 from updater import check_for_updates, install_update
 from utils import format_age
 
+logger = logging.getLogger("wisper")
+
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
+VERSION = "1.0.0"
 
 
 def _make_menubar_image():
@@ -37,6 +42,7 @@ def _make_menubar_image():
     and black on light ones, matching all other system status icons.
     """
     from Foundation import NSMakeRect
+
     size = 22.0  # standard menu-bar icon point size
     img = AppKit.NSImage.alloc().initWithSize_((size, size))
     img.lockFocus()
@@ -68,8 +74,8 @@ class _MenuDelegate(AppKit.NSObject):
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
         self._hover_on_update = False  # cursor is over the update item
-        self._check_active = False     # a check/install is in progress
-        self.update_nsitem = None      # set by WisperApp after menu is built
+        self._check_active = False  # a check/install is in progress
+        self.update_nsitem = None  # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
@@ -81,18 +87,27 @@ class _MenuDelegate(AppKit.NSObject):
     def menu_willHighlightItem_(self, menu, item):
         if self.update_nsitem is None or self._check_active:
             return
-        self._hover_on_update = (item is not None and item == self.update_nsitem)
+        self._hover_on_update = item is not None and item == self.update_nsitem
 
 
 class WisperApp(rumps.App):
     def __init__(self):
-        super().__init__('Wisper', quit_button=None)
+        super().__init__("Wisper", quit_button=None)
         self.config = Config.load()
+
+        # Configure rotating log file.
+        APP_DIR.mkdir(exist_ok=True)
+        _handler = logging.handlers.RotatingFileHandler(
+            APP_DIR / "wisper.log", maxBytes=1_000_000, backupCount=3
+        )
+        _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        logger.addHandler(_handler)
+        logger.setLevel(logging.INFO)
 
         self.recorder = AudioRecorder()
         self.transcriber = Transcriber(self.config.model)
         self.postprocessor = PostProcessor(self.config)
-        self.db = HistoryDB(APP_DIR / 'history.db')
+        self.db = HistoryDB(APP_DIR / "history.db")
         self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
         # Flags set by background threads; consumed by main-thread _ui_tick.
@@ -105,7 +120,9 @@ class WisperApp(rumps.App):
         self._mismatch_ticks = 0
 
         # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
-        self._update_state = None
+        # Protected by _update_lock for safe cross-thread access.
+        self._update_lock = threading.Lock()
+        self.__update_state = None
 
         # _nsapp (rumps internals) is only created inside run(); defer NSStatusItem
         # customisation to the first _ui_tick so the run loop has already started.
@@ -114,6 +131,7 @@ class WisperApp(rumps.App):
         self._menu_delegate = _MenuDelegate.alloc().init()
         self._build_menu()
         self._setup_hotkey()
+        self._check_permissions()
 
         # Pump UI updates on the main thread so we never touch NSMenu from a
         # background thread (AppKit requirement).
@@ -125,16 +143,26 @@ class WisperApp(rumps.App):
         # Background update check 5s after launch (non-blocking).
         threading.Timer(5.0, self._run_update_check).start()
 
+    @property
+    def _update_state(self):
+        with self._update_lock:
+            return self.__update_state
+
+    @_update_state.setter
+    def _update_state(self, value):
+        with self._update_lock:
+            self.__update_state = value
+
     # ------------------------------------------------------------------ menu
 
     def _build_menu(self):
-        self.status_item = rumps.MenuItem('Hold fn to record')
+        self.status_item = rumps.MenuItem("Hold fn to record")
 
-        self.history_menu = rumps.MenuItem('History')
+        self.history_menu = rumps.MenuItem("History")
         self._refresh_history()
 
         self.model_items: dict[str, rumps.MenuItem] = {}
-        model_menu = rumps.MenuItem('Model')
+        model_menu = rumps.MenuItem("Model")
         for m in MODELS:
             item = rumps.MenuItem(m, callback=lambda _, model=m: self._set_model(model))
             model_menu[m] = item
@@ -142,15 +170,20 @@ class WisperApp(rumps.App):
         self._sync_model_checkmarks()
 
         self.cleanup_items: dict[str, rumps.MenuItem] = {}
-        cleanup_menu = rumps.MenuItem('Text Cleanup')
-        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI — Polish & rewrite (Apple Silicon)'}
+        cleanup_menu = rumps.MenuItem("Text Cleanup")
+        labels = {
+            "none": "None",
+            "regex": "Basic (remove um/uh)",
+            "ai": "AI — Polish & rewrite (Apple Silicon)",
+        }
         for mode in CLEANUP_MODES:
             item = rumps.MenuItem(labels[mode], callback=lambda _, m=mode: self._set_cleanup(m))
             cleanup_menu[mode] = item
             self.cleanup_items[mode] = item
         self._sync_cleanup_checkmarks()
 
-        self.update_item = rumps.MenuItem('Check for Updates', callback=self._update_action)
+        self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
+        version_item = rumps.MenuItem(f"Wisper v{VERSION}")
 
         self.menu = [
             self.status_item,
@@ -160,17 +193,23 @@ class WisperApp(rumps.App):
             cleanup_menu,
             None,
             self.update_item,
-            rumps.MenuItem('Quit Wisper', callback=self._quit),
+            None,
+            version_item,
+            rumps.MenuItem("Quit Wisper", callback=self._quit),
         ]
 
     def _sync_model_checkmarks(self):
         for m, item in self.model_items.items():
-            item.title = ('✓ ' if m == self.config.model else '   ') + m
+            item.title = ("✓ " if m == self.config.model else "   ") + m
 
     def _sync_cleanup_checkmarks(self):
-        labels = {'none': 'None', 'regex': 'Basic (remove um/uh)', 'ai': 'AI — Polish & rewrite (Apple Silicon)'}
+        labels = {
+            "none": "None",
+            "regex": "Basic (remove um/uh)",
+            "ai": "AI — Polish & rewrite (Apple Silicon)",
+        }
         for mode, item in self.cleanup_items.items():
-            item.title = ('✓ ' if mode == self.config.cleanup_mode else '   ') + labels[mode]
+            item.title = ("✓ " if mode == self.config.cleanup_mode else "   ") + labels[mode]
 
     def _set_cleanup(self, mode: str):
         self.config.cleanup_mode = mode
@@ -184,7 +223,7 @@ class WisperApp(rumps.App):
         btn = nssi.button()
         if btn is not None:
             btn.setImage_(_make_menubar_image())
-            btn.setTitle_('')
+            btn.setTitle_("")
         nsm = nssi.menu()
         if nsm:
             nsm.setDelegate_(self._menu_delegate)
@@ -195,7 +234,7 @@ class WisperApp(rumps.App):
             self._configure_nsapp()
             self._nsapp_configured = True
         # Quit must happen on the main thread; background install sets this state.
-        if self._update_state == 'restarting':
+        if self._update_state == "restarting":
             rumps.quit_application()
             return
         if self._needs_history_refresh:
@@ -210,22 +249,26 @@ class WisperApp(rumps.App):
         self._watchdog()
 
     def _restore_clipboard(self, saved_items: list):
-        pb = AppKit.NSPasteboard.generalPasteboard()
-        pb.clearContents()
-        ns_items = []
-        for saved_data in saved_items:
-            item = AppKit.NSPasteboardItem.new()
-            for ptype, raw in saved_data.items():
-                ns_data = AppKit.NSData.dataWithBytes_length_(raw, len(raw))
-                item.setData_forType_(ns_data, ptype)
-            ns_items.append(item)
-        if ns_items:
-            pb.writeObjects_(ns_items)
+        try:
+            pb = AppKit.NSPasteboard.generalPasteboard()
+            pb.clearContents()
+            ns_items = []
+            for saved_data in saved_items:
+                item = AppKit.NSPasteboardItem.new()
+                for ptype, raw in saved_data.items():
+                    ns_data = AppKit.NSData.dataWithBytes_length_(raw, len(raw))
+                    item.setData_forType_(ns_data, ptype)
+                ns_items.append(item)
+            if ns_items:
+                pb.writeObjects_(ns_items)
+        except Exception as exc:
+            logger.error("Clipboard restore failed: %s", exc)
+            rumps.notification("Wisper", "Clipboard restore failed", str(exc), sound=False)
 
     # ------------------------------------------------------------- watchdog
 
     _MAX_RECORDING_S = 300  # 5 minutes — auto-stop if stuck this long
-    _MISMATCH_GRACE = 3     # ticks (~0.9 s) before treating divergence as stuck
+    _MISMATCH_GRACE = 3  # ticks (~0.9 s) before treating divergence as stuck
 
     def _watchdog(self):
         recorder_on = self.recorder.is_recording
@@ -235,40 +278,40 @@ class WisperApp(rumps.App):
         if recorder_on != hotkey_on:
             self._mismatch_ticks += 1
             if self._mismatch_ticks >= self._MISMATCH_GRACE:
-                self._emergency_reset('state mismatch')
+                self._emergency_reset("state mismatch")
             return
         self._mismatch_ticks = 0
 
         # Enforce maximum recording duration.
         if recorder_on and self._recording_started_at is not None:
             if time.monotonic() - self._recording_started_at > self._MAX_RECORDING_S:
-                self._emergency_reset('max duration exceeded')
+                self._emergency_reset("max duration exceeded")
 
-    def _emergency_reset(self, reason: str = ''):
+    def _emergency_reset(self, reason: str = ""):
         self.recorder.stop()
         self.hotkey.force_reset()
         self._recording_started_at = None
         self._mismatch_ticks = 0
         self._pasting = False
-        self.status_item.title = 'Hold fn to record'
-        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)
+        self.status_item.title = "Hold fn to record"
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("hide:", None, False)
 
     def _sync_update_item(self):
         s = self._update_state
         if s is None:
-            title, enabled = 'Check for Updates', True
-        elif s == 'checking':
-            title, enabled = 'Checking for updates…', False
+            title, enabled = "Check for Updates", True
+        elif s == "checking":
+            title, enabled = "Checking for updates…", False
         elif s == 0:
-            title, enabled = 'Up to date ✓', True
+            title, enabled = "Up to date ✓", True
         elif isinstance(s, int):
-            title, enabled = 'Update Available — Install', True
-        elif s == 'installing':
-            title, enabled = 'Installing update…', False
-        elif s == 'restarting':
-            title, enabled = 'Restarting…', False
+            title, enabled = "Update Available — Install", True
+        elif s == "installing":
+            title, enabled = "Installing update…", False
+        elif s == "restarting":
+            title, enabled = "Restarting…", False
         else:  # 'error'
-            title, enabled = 'Update check failed — retry', True
+            title, enabled = "Update check failed — retry", True
         self.update_item.title = title
         self.update_item._menuitem.setEnabled_(enabled)
 
@@ -279,23 +322,42 @@ class WisperApp(rumps.App):
 
         items = self.db.get_recent(self.config.history_limit)
         if not items:
-            self.history_menu['_empty'] = rumps.MenuItem('(empty)')
+            self.history_menu["_empty"] = rumps.MenuItem("(empty)")
             return
 
         for item in items:
-            snippet = item['text'][:38] + ('…' if len(item['text']) > 38 else '')
-            model = item['model'] or '?'
-            secs = item['latency_ms'] / 1000
-            age = format_age(item['created_at'])
+            snippet = item["text"][:38] + ("…" if len(item["text"]) > 38 else "")
+            model = item["model"] or "?"
+            secs = item["latency_ms"] / 1000
+            age = format_age(item["created_at"])
             label = f"{snippet}    {age}  ·  {model}  {secs:.1f}s"
-            text = item['text']
+            text = item["text"]
             mi = rumps.MenuItem(label, callback=lambda _, t=text: self._recopy(t))
-            self.history_menu[str(item['id'])] = mi
+            self.history_menu[str(item["id"])] = mi
 
         # Separator via a disabled, untitled item — avoids None dict-key ambiguity.
-        self.history_menu['_clear'] = rumps.MenuItem(
-            '— Clear History', callback=self._clear_history
+        self.history_menu["_clear"] = rumps.MenuItem(
+            "— Clear History", callback=self._clear_history
         )
+
+    # ---------------------------------------------------------- permissions
+
+    def _check_permissions(self):
+        """Warn the user if required macOS permissions are missing."""
+        try:
+            import ApplicationServices  # type: ignore  # macOS-only
+
+            if not ApplicationServices.AXIsProcessTrusted():
+                self.status_item.title = "⚠ Grant Accessibility — System Settings"
+                logger.warning("Accessibility permission not granted")
+                rumps.notification(
+                    "Wisper",
+                    "Accessibility permission required",
+                    "System Settings → Privacy & Security → Accessibility",
+                    sound=False,
+                )
+        except Exception:
+            pass  # not on macOS or permission API unavailable
 
     # --------------------------------------------------------------- hotkey
 
@@ -312,35 +374,39 @@ class WisperApp(rumps.App):
         try:
             self.recorder.start()
         except Exception as exc:
-            rumps.notification('Wisper', 'Could not start recording', str(exc), sound=False)
+            logger.error("Could not start recording: %s", exc)
+            rumps.notification("Wisper", "Could not start recording", str(exc), sound=False)
             raise  # re-raise so HotkeyManager rolls back _recording = False
         self._recording_started_at = time.monotonic()
-        self.status_item.title = 'Recording… release fn to stop'
-        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('show:', None, False)
+        logger.info("Recording started")
+        self.status_item.title = "Recording… release fn to stop"
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("show:", None, False)
 
     def _on_fn_up(self):
         self._recording_started_at = None
         audio_ms = self.recorder.duration_ms()
         audio = self.recorder.stop()
-        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_('hide:', None, False)
+        self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("hide:", None, False)
 
-        self.status_item.title = 'Hold fn to record'
+        self.status_item.title = "Hold fn to record"
 
         if audio is None or audio_ms < MIN_AUDIO_MS:
             return
 
-        self.status_item.title = 'Transcribing…'
+        self.status_item.title = "Transcribing…"
 
         try:
             t0 = time.monotonic()
             text = self.transcriber.transcribe(audio)
             latency_ms = int((time.monotonic() - t0) * 1000)
+            logger.info("Transcribed %d ms audio in %d ms", audio_ms, latency_ms)
         except Exception as exc:
-            rumps.notification('Wisper', 'Transcription failed', str(exc), sound=False)
-            self.status_item.title = 'Hold fn to record'
+            logger.error("Transcription failed: %s", exc)
+            rumps.notification("Wisper", "Transcription failed", str(exc), sound=False)
+            self.status_item.title = "Hold fn to record"
             return
 
-        self.status_item.title = 'Hold fn to record'
+        self.status_item.title = "Hold fn to record"
 
         if not text:
             return
@@ -358,7 +424,7 @@ class WisperApp(rumps.App):
         # so the restore is deferred to _ui_tick via _pending_restore.
         pb = AppKit.NSPasteboard.generalPasteboard()
         saved_items = []
-        for item in (pb.pasteboardItems() or []):
+        for item in pb.pasteboardItems() or []:
             saved_data = {}
             for ptype in item.types():
                 data = item.dataForType_(ptype)
@@ -371,18 +437,21 @@ class WisperApp(rumps.App):
         # clipboard snapshot from a previous transcription in between them.
         self._pasting = True
         self._pending_restore = None  # discard any unprocessed previous restore
-        subprocess.run(['pbcopy'], input=text.encode(), check=True)
-        subprocess.run([
-            'osascript', '-e',
-            'tell application "System Events" to keystroke "v" using command down',
-        ])
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
+        subprocess.run(
+            [
+                "osascript",
+                "-e",
+                'tell application "System Events" to keystroke "v" using command down',
+            ]
+        )
         # Set restore payload before clearing the flag so _ui_tick always sees
         # both fields in a consistent state (Python GIL makes each assignment atomic).
         self._pending_restore = saved_items
         self._pasting = False
 
     def _recopy(self, text: str):
-        subprocess.run(['pbcopy'], input=text.encode(), check=True)
+        subprocess.run(["pbcopy"], input=text.encode(), check=True)
 
     # --------------------------------------------------------- menu actions
 
@@ -400,14 +469,14 @@ class WisperApp(rumps.App):
 
     def _update_action(self, _):
         s = self._update_state
-        if s in (None, 0, 'error'):
-            self._update_state = 'checking'
+        if s in (None, 0, "error"):
+            self._update_state = "checking"
             self._menu_delegate._check_active = True
             # Safety release so a hung network can't trap the menu forever.
             threading.Timer(15.0, self._unblock_menu).start()
             threading.Thread(target=self._run_update_check, daemon=True).start()
         elif isinstance(s, int) and s > 0:
-            self._update_state = 'installing'
+            self._update_state = "installing"
             threading.Thread(target=self._run_install, daemon=True).start()
 
     def _unblock_menu(self):
@@ -415,7 +484,7 @@ class WisperApp(rumps.App):
 
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
-        self._update_state = n if n >= 0 else 'error'
+        self._update_state = n if n >= 0 else "error"
         self._unblock_menu()
         if n == 0:
             threading.Timer(4.0, self._reset_update_state).start()
@@ -427,7 +496,7 @@ class WisperApp(rumps.App):
     def _run_install(self):
         ok = install_update(REPO_DIR)
         if not ok:
-            self._update_state = 'error'
+            self._update_state = "error"
             return
 
         self.hotkey.stop()
@@ -435,12 +504,12 @@ class WisperApp(rumps.App):
         # Try launchctl kickstart first — this handles the normal launchd-managed
         # case and starts the new process before this one exits.
         r = subprocess.run(
-            ['launchctl', 'kickstart', '-k', f'gui/{os.getuid()}/com.wisper.app'],
+            ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.wisper.app"],
             capture_output=True,
         )
         if r.returncode != 0:
             # Not managed by launchd (e.g. started from terminal) — spawn directly.
-            launcher = REPO_DIR / 'Wisper.app' / 'Contents' / 'MacOS' / 'Wisper'
+            launcher = REPO_DIR / "Wisper.app" / "Contents" / "MacOS" / "Wisper"
             if launcher.exists():
                 subprocess.Popen(
                     [str(launcher)],
@@ -452,7 +521,7 @@ class WisperApp(rumps.App):
         # Signal _ui_tick to call rumps.quit_application() on the main thread.
         # Calling it directly here (background thread) causes an unclean exit
         # that makes launchd throttle the restart.
-        self._update_state = 'restarting'
+        self._update_state = "restarting"
 
     # --------------------------------------------------------------- quit
 
@@ -461,5 +530,5 @@ class WisperApp(rumps.App):
         rumps.quit_application()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":  # pragma: no cover
     WisperApp().run()

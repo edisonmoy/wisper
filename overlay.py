@@ -26,19 +26,19 @@ _BORDERLESS = 0
 _NONACTIVATING_PANEL = 1 << 7
 
 # NSVisualEffectMaterial / State
-_MATERIAL_HUD = 6       # NSVisualEffectMaterialHUDWindow
-_BLENDING_BEHIND = 0    # NSVisualEffectBlendingModeBehindWindow
-_STATE_ACTIVE = 1       # NSVisualEffectStateActive
+_MATERIAL_HUD = 6  # NSVisualEffectMaterialHUDWindow
+_BLENDING_BEHIND = 0  # NSVisualEffectBlendingModeBehindWindow
+_STATE_ACTIVE = 1  # NSVisualEffectStateActive
 
-_FLOATING_LEVEL = 8     # NSFloatingWindowLevel
+_FLOATING_LEVEL = 8  # NSFloatingWindowLevel
 
-_PANEL_ALPHA = 0.82     # overall window opacity
+_PANEL_ALPHA = 0.82  # overall window opacity
 
 
 class _WaveformView(NSView):
     def initWithFrame_(self, frame):
         self = objc.super(_WaveformView, self).initWithFrame_(frame)
-        if self is None:
+        if self is None:  # pragma: no cover — NSView.alloc().initWithFrame_ never returns nil
             return None
         self._samples = []
         return self
