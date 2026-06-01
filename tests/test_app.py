@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_mod
-from app import VERSION, WisperApp, _make_menubar_image, _MenuDelegate, _HOTKEY_ITEM_TAG
+from app import VERSION, WisperApp, _make_menubar_image, _HOTKEY_PRESETS
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,72 +69,6 @@ def test_make_menubar_image_returns_something():
 def test_version_constant_is_string():
     assert isinstance(VERSION, str)
     assert len(VERSION) > 0
-
-
-# ---------------------------------------------------------------------------
-# _MenuDelegate
-# ---------------------------------------------------------------------------
-
-
-class TestMenuDelegate:
-    def _delegate(self):
-        return _MenuDelegate.alloc().init()
-
-    def test_initial_state(self):
-        d = self._delegate()
-        assert d._hover_on_update is False
-        assert d._check_active is False
-        assert d.update_nsitem is None
-
-    def test_menu_should_close_true_when_idle(self):
-        d = self._delegate()
-        assert d.menuShouldClose_(None) is True
-
-    def test_menu_should_close_false_when_hovering_update(self):
-        d = self._delegate()
-        d._hover_on_update = True
-        assert d.menuShouldClose_(None) is False
-
-    def test_menu_should_close_false_when_check_active(self):
-        d = self._delegate()
-        d._check_active = True
-        assert d.menuShouldClose_(None) is False
-
-    def test_menu_did_close_resets_hover(self):
-        d = self._delegate()
-        d._hover_on_update = True
-        d.menuDidClose_(None)
-        assert d._hover_on_update is False
-
-    def test_highlight_sets_hover_when_on_update_item(self):
-        d = self._delegate()
-        item = MagicMock()
-        d.update_nsitem = item
-        d.menu_willHighlightItem_(None, item)
-        assert d._hover_on_update is True
-
-    def test_highlight_clears_hover_when_on_other_item(self):
-        d = self._delegate()
-        d.update_nsitem = MagicMock()
-        d._hover_on_update = True
-        d.menu_willHighlightItem_(None, MagicMock())
-        assert d._hover_on_update is False
-
-    def test_highlight_noop_when_check_active(self):
-        d = self._delegate()
-        d._check_active = True
-        item = MagicMock()
-        d.update_nsitem = item
-        d._hover_on_update = False
-        d.menu_willHighlightItem_(None, item)
-        assert d._hover_on_update is False
-
-    def test_highlight_none_item_clears_hover(self):
-        d = self._delegate()
-        d.update_nsitem = MagicMock()
-        d._hover_on_update = True
-        d.menu_willHighlightItem_(None, None)
-        assert d._hover_on_update is False
 
 
 # ---------------------------------------------------------------------------
@@ -267,26 +201,6 @@ def test_configure_nsapp_calls_set_image_when_button_present(wa):
 def test_configure_nsapp_skips_image_when_no_button(wa):
     wa._nsapp = MagicMock()
     wa._nsapp.nsstatusitem.button.return_value = None
-    nsm = MagicMock()
-    wa._nsapp.nsstatusitem.menu.return_value = nsm
-    wa._configure_nsapp()  # must not raise
-
-
-def test_configure_nsapp_sets_delegate_when_menu_present(wa):
-    # Simulate the case where _build_menu's early setup failed (no _nsm yet).
-    wa._nsm = None
-    wa._nsapp = MagicMock()
-    wa._nsapp.nsstatusitem.button.return_value = None
-    nsm = MagicMock()
-    wa._nsapp.nsstatusitem.menu.return_value = nsm
-    wa._configure_nsapp()
-    nsm.setDelegate_.assert_called_once_with(wa._menu_delegate)
-
-
-def test_configure_nsapp_skips_delegate_when_no_menu(wa):
-    wa._nsapp = MagicMock()
-    wa._nsapp.nsstatusitem.button.return_value = None
-    wa._nsapp.nsstatusitem.menu.return_value = None
     wa._configure_nsapp()  # must not raise
 
 
@@ -849,10 +763,8 @@ def test_update_action_noop_when_installing(wa):
     mock_thread.assert_not_called()
 
 
-def test_unblock_menu_clears_check_active(wa):
-    wa._menu_delegate._check_active = True
-    wa._unblock_menu()
-    assert wa._menu_delegate._check_active is False
+def test_unblock_menu_is_noop(wa):
+    wa._unblock_menu()  # must not raise
 
 
 def test_run_update_check_auto_installs_when_updates_available(wa):
@@ -956,7 +868,7 @@ def test_quit_calls_quit_application(wa):
 
 
 # ---------------------------------------------------------------------------
-# hotkey capture
+# hotkey preset submenu
 # ---------------------------------------------------------------------------
 
 
@@ -970,147 +882,40 @@ def test_idle_title_contains_hotkey_label(wa):
     assert wa._hotkey_label() in wa._idle_title()
 
 
-def test_hotkey_item_shows_current_key(wa):
-    assert wa._hotkey_label() in wa.hotkey_item.title
+def test_hotkey_menu_has_preset_items(wa):
+    """Hotkey submenu contains all presets."""
+    assert len(wa.hotkey_preset_items) == len(_HOTKEY_PRESETS)
 
 
-def test_on_set_hotkey_starts_capture(wa):
-    with patch.object(wa, "_start_hotkey_capture") as mock_capture:
-        wa._on_set_hotkey(None)
-    mock_capture.assert_called_once()
+def test_hotkey_checkmarks_show_current(wa):
+    """The preset matching the current config has a checkmark."""
+    wa.config.hotkey_vk = 63
+    wa.config.hotkey_key = ""
+    wa._sync_hotkey_checkmarks()
+    item, name = wa.hotkey_preset_items[(63, "")]
+    assert item.title.startswith("✓")
 
 
-def test_on_set_hotkey_noop_when_already_capturing(wa):
-    wa._capturing_hotkey = True
-    with patch.object(wa, "_start_hotkey_capture") as mock_capture:
-        wa._on_set_hotkey(None)
-    mock_capture.assert_not_called()
+def test_hotkey_checkmarks_clear_others(wa):
+    """Only the active preset has a checkmark; all others start with spaces."""
+    wa.config.hotkey_vk = 63
+    wa.config.hotkey_key = ""
+    wa._sync_hotkey_checkmarks()
+    for (vk, key_name), (item, name) in wa.hotkey_preset_items.items():
+        if (vk, key_name) == (63, ""):
+            assert item.title.startswith("✓")
+        else:
+            assert item.title.startswith(" ")
 
 
-def test_start_hotkey_capture_stops_listener_and_enters_mode(wa):
-    with patch.object(wa.hotkey, "stop") as mock_stop:
-        with patch("app._kb.Listener", return_value=MagicMock()):
-            with patch("app.threading.Timer", return_value=MagicMock()):
-                wa._start_hotkey_capture()
-    mock_stop.assert_called_once()
-    assert wa._capturing_hotkey is True
-    assert "press a key" in wa.status_item.title.lower()
-
-
-def test_finish_hotkey_capture_unblocks_menu(wa):
-    from pynput import keyboard
-
-    wa._capture_timer = MagicMock()
-    wa._capturing_hotkey = True
-    with patch.object(wa, "_setup_hotkey"):
-        with patch.object(wa, "_close_menu"):
-            wa._finish_hotkey_capture(keyboard.Key.alt_r)
-    assert wa._menu_delegate._check_active is False
-
-
-def test_cancel_hotkey_capture_unblocks_menu(wa):
-    wa._capture_timer = MagicMock()
-    wa._capture_listener = MagicMock()
-    wa._capturing_hotkey = True
-    with patch.object(wa, "_setup_hotkey"):
-        with patch.object(wa, "_close_menu"):
-            wa._cancel_hotkey_capture()
-    assert wa._menu_delegate._check_active is False
-
-
-def test_close_menu_noop_without_nsm(wa):
-    wa._nsm = None
-    wa._close_menu()  # must not raise
-
-
-def test_finish_hotkey_capture_vk_key_saves_vk(wa):
-    from pynput import keyboard
-
-    mock_timer = MagicMock()
-    wa._capture_timer = mock_timer
-    wa._capturing_hotkey = True
-    key = keyboard.KeyCode(vk=61)
-    with patch.object(wa, "_setup_hotkey"):
-        wa._finish_hotkey_capture(key)
-    assert wa.config.hotkey_vk == 61
-    assert wa.config.hotkey_key == ""
-    assert not wa._capturing_hotkey
-
-
-def test_finish_hotkey_capture_named_key_saves_name(wa):
-    from pynput import keyboard
-
-    mock_timer = MagicMock()
-    wa._capture_timer = mock_timer
-    wa._capturing_hotkey = True
-    key = keyboard.Key.alt_r
-    with patch.object(wa, "_setup_hotkey"):
-        wa._finish_hotkey_capture(key)
-    assert wa.config.hotkey_key == "alt_r"
-    assert not wa._capturing_hotkey
-
-
-def test_finish_hotkey_capture_updates_menu_and_status(wa):
-    from pynput import keyboard
-
-    mock_timer = MagicMock()
-    wa._capture_timer = mock_timer
-    wa._capturing_hotkey = True
-    key = keyboard.Key.alt_r
-    with patch.object(wa, "_setup_hotkey"):
-        wa._finish_hotkey_capture(key)
-    assert "Right ⌥" in wa.hotkey_item.title
-    assert "Right ⌥" in wa.status_item.title
-
-
-def test_cancel_hotkey_capture_restores_state(wa):
-    mock_timer = MagicMock()
-    mock_listener = MagicMock()
-    wa._capture_timer = mock_timer
-    wa._capture_listener = mock_listener
-    wa._capturing_hotkey = True
-    with patch.object(wa, "_setup_hotkey"):
-        wa._cancel_hotkey_capture()
-    assert not wa._capturing_hotkey
-    mock_listener.stop.assert_called_once()
-    assert wa.status_item.title == wa._idle_title()
-
-
-def test_cancel_hotkey_capture_noop_when_not_capturing(wa):
-    wa._capturing_hotkey = False
+def test_set_hotkey_saves_and_reloads(wa):
     with patch.object(wa, "_setup_hotkey") as mock_setup:
-        wa._cancel_hotkey_capture()
-    mock_setup.assert_not_called()
+        wa._set_hotkey(0, "alt_r")
+    assert wa.config.hotkey_key == "alt_r"
+    assert wa.config.hotkey_vk == 0
+    mock_setup.assert_called_once()
 
 
-def test_on_capture_release_esc_cancels(wa):
-    from pynput import keyboard
-
-    wa._capturing_hotkey = True
-    with patch.object(wa, "_cancel_hotkey_capture") as mock_cancel:
-        result = wa._on_capture_release(keyboard.Key.esc)
-    mock_cancel.assert_called_once()
-    assert result is False
-
-
-def test_on_capture_release_printable_char_cancels_with_notification(wa):
-    from pynput import keyboard
-
-    wa._capturing_hotkey = True
-    key = keyboard.KeyCode.from_char("a")
-    with patch.object(wa, "_cancel_hotkey_capture") as mock_cancel:
-        result = wa._on_capture_release(key)
-    mock_cancel.assert_called_once()
-    wa._mock_notification.assert_called()
-    assert result is False
-
-
-def test_on_capture_release_valid_key_finishes_capture(wa):
-    from pynput import keyboard
-
-    wa._capturing_hotkey = True
-    key = keyboard.Key.alt_r
-    with patch.object(wa, "_finish_hotkey_capture") as mock_finish:
-        result = wa._on_capture_release(key)
-    mock_finish.assert_called_once_with(key)
-    assert result is False
+def test_hotkey_menu_title_updates(wa):
+    wa._set_hotkey(63, "")
+    assert "fn" in wa.hotkey_menu.title.lower()

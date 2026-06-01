@@ -6,7 +6,6 @@ import threading
 import time
 
 import AppKit
-import objc
 import rumps
 import setproctitle
 
@@ -21,7 +20,6 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
 
 from config import APP_DIR, CLEANUP_MODES, MODELS, REPO_DIR, Config
 from history import HistoryDB
-from pynput import keyboard as _kb
 from hotkey import HotkeyManager, key_display_name
 from overlay import create_recording_overlay
 from postprocessor import PostProcessor
@@ -34,6 +32,21 @@ logger = logging.getLogger("wisper")
 
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
 VERSION = "1.0.0"
+
+# Preset hotkey options shown in the Hotkey submenu.
+# Each entry: (display_name, hotkey_vk, hotkey_key)
+_HOTKEY_PRESETS = [
+    ("fn  (built-in Globe key)", 63, ""),
+    ("Right ⌥  Option", 0, "alt_r"),
+    ("Left ⌥  Option", 0, "alt_l"),
+    ("Right ⌃  Control", 0, "ctrl_r"),
+    ("Left ⌃  Control", 0, "ctrl_l"),
+    ("Caps Lock", 0, "caps_lock"),
+    ("F13", 0, "f13"),
+    ("F14", 0, "f14"),
+    ("F15", 0, "f15"),
+    ("F16", 0, "f16"),
+]
 
 
 def _make_menubar_image():
@@ -64,42 +77,6 @@ def _make_menubar_image():
     return img
 
 
-# Unique NSMenuItem tag used to identify the hotkey item in willHighlightItem_.
-# Avoids PyObjC NSMenuItem identity-comparison issues.
-_HOTKEY_ITEM_TAG = 9001
-
-
-class _MenuDelegate(AppKit.NSObject):
-    """NSMenu delegate that keeps the menu open during an async update check.
-
-    menuShouldClose_ fires during the click event — before the Python
-    callback runs — so the blocking flag must be set earlier, in
-    willHighlightItem_, while the cursor is hovering over the item.
-    """
-
-    def init(self):
-        self = objc.super(_MenuDelegate, self).init()
-        self._hover_on_update = False  # cursor is over the update item
-        self._check_active = False  # async update check in progress
-        self.update_nsitem = None  # set by WisperApp after menu is built
-        return self
-
-    def menuShouldClose_(self, _menu):
-        return not (self._hover_on_update or self._check_active)
-
-    def menuDidClose_(self, _menu):
-        self._hover_on_update = False
-
-    def menu_willHighlightItem_(self, menu, item):
-        if self._check_active:
-            return
-        self._hover_on_update = (
-            self.update_nsitem is not None
-            and item is not None
-            and item == self.update_nsitem
-        )
-
-
 class WisperApp(rumps.App):
     def __init__(self):
         super().__init__("Wisper", quit_button=None)
@@ -120,11 +97,6 @@ class WisperApp(rumps.App):
         self.db = HistoryDB(APP_DIR / "history.db")
         self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
-        # Hotkey capture state
-        self._capturing_hotkey = False
-        self._capture_listener = None
-        self._capture_timer = None
-
         # Flags set by background threads; consumed by main-thread _ui_tick.
         self._needs_history_refresh = False
         self._pending_restore: list | None = None  # clipboard snapshot to restore
@@ -143,7 +115,6 @@ class WisperApp(rumps.App):
         # customisation to the first _ui_tick so the run loop has already started.
         self._nsapp_configured = False
 
-        self._menu_delegate = _MenuDelegate.alloc().init()
         self._build_menu()
         self._setup_hotkey()
         self._check_permissions()
@@ -203,14 +174,14 @@ class WisperApp(rumps.App):
             self.cleanup_items[mode] = item
         self._sync_cleanup_checkmarks()
 
-        self.hotkey_item = rumps.MenuItem(
-            f"Hotkey: {self._hotkey_label()}",
-            callback=self._on_set_hotkey,
-        )
-        # Set tag immediately so willHighlightItem_ can identify this item
-        # even before _configure_nsapp runs (which may be too late if nssi.menu()
-        # returns None on the first deferred tick).
-        self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
+        hotkey_menu = rumps.MenuItem(f"Hotkey: {self._hotkey_label()}")
+        self.hotkey_preset_items: dict[tuple, tuple] = {}
+        for name, vk, key_name in _HOTKEY_PRESETS:
+            item = rumps.MenuItem(name, callback=lambda _, v=vk, k=key_name: self._set_hotkey(v, k))
+            hotkey_menu[name] = item
+            self.hotkey_preset_items[(vk, key_name)] = (item, name)
+        self.hotkey_menu = hotkey_menu
+        self._sync_hotkey_checkmarks()
 
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
 
@@ -220,22 +191,11 @@ class WisperApp(rumps.App):
             self.history_menu,
             model_menu,
             cleanup_menu,
-            self.hotkey_item,
+            self.hotkey_menu,
             None,
             self.update_item,
             rumps.MenuItem("Quit Wisper", callback=self._quit),
         ]
-
-        # Wire delegate directly to the backing NSMenu now — this is the same
-        # NSMenu that rumps will hand to NSStatusItem, so setDelegate_ here is
-        # equivalent to doing it after the run loop starts.
-        try:
-            nsm = self.menu._menu
-            nsm.setDelegate_(self._menu_delegate)
-            self._menu_delegate.update_nsitem = self.update_item._menuitem
-            self._nsm = nsm
-        except Exception:
-            pass  # will be retried in _configure_nsapp
 
     def _sync_model_checkmarks(self):
         for m, item in self.model_items.items():
@@ -263,15 +223,6 @@ class WisperApp(rumps.App):
         if btn is not None:
             btn.setImage_(_make_menubar_image())
             btn.setTitle_("")
-        # Delegate and tag are already set in _build_menu via self.menu._menu.
-        # Re-apply here only if that earlier attempt failed (e.g. _nsm not set).
-        if not getattr(self, "_nsm", None):
-            nsm = nssi.menu()
-            if nsm:
-                nsm.setDelegate_(self._menu_delegate)
-                self._menu_delegate.update_nsitem = self.update_item._menuitem
-                self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
-                self._nsm = nsm
 
     def _ui_tick(self, _):
         if not self._nsapp_configured:
@@ -414,81 +365,19 @@ class WisperApp(rumps.App):
         )
         self.hotkey.start()
 
-    def _on_set_hotkey(self, _):
-        if self._capturing_hotkey:
-            return
-        self._start_hotkey_capture()
+    def _sync_hotkey_checkmarks(self):
+        for (vk, key_name), (item, name) in self.hotkey_preset_items.items():
+            current = self.config.hotkey_vk == vk and self.config.hotkey_key == key_name
+            item.title = ("✓ " if current else "   ") + name
+        self.hotkey_menu.title = f"Hotkey: {self._hotkey_label()}"
 
-    def _start_hotkey_capture(self):
-        self._capturing_hotkey = True
-        self.hotkey.stop()
-        self.status_item.title = "Press a key… (Esc to cancel)"
-        self.hotkey_item.title = "Hotkey: (press a key…)"
-        self._capture_listener = _kb.Listener(on_release=self._on_capture_release)
-        self._capture_listener.daemon = True
-        self._capture_listener.start()
-        self._capture_timer = threading.Timer(10.0, self._cancel_hotkey_capture)
-        self._capture_timer.start()
-
-    def _on_capture_release(self, key):
-        if key == _kb.Key.esc:
-            self._cancel_hotkey_capture()
-            return False
-        # Reject printable character keys — they'd fire on every keystroke while typing.
-        if isinstance(key, _kb.KeyCode) and key.char and key.char.isprintable():
-            rumps.notification(
-                "Wisper",
-                "Invalid hotkey",
-                "Choose a modifier key (Option, Control, Fn) or F-key instead.",
-                sound=False,
-            )
-            self._cancel_hotkey_capture()
-            return False
-        self._finish_hotkey_capture(key)
-        return False
-
-    def _finish_hotkey_capture(self, key):
-        if self._capture_timer:
-            self._capture_timer.cancel()
-        self._capturing_hotkey = False
-        self._capture_listener = None
-        if isinstance(key, _kb.KeyCode) and key.vk is not None:
-            self.config.hotkey_vk = key.vk
-            self.config.hotkey_key = ""
-        elif isinstance(key, _kb.Key):
-            self.config.hotkey_key = key.name
+    def _set_hotkey(self, vk: int, key_name: str):
+        self.config.hotkey_vk = vk
+        self.config.hotkey_key = key_name
         self.config.save()
-        self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
-        self.status_item.title = self._idle_title()
+        self._sync_hotkey_checkmarks()
         self._setup_hotkey()
         logger.info("Hotkey changed to: %s", self._hotkey_label())
-
-    def _cancel_hotkey_capture(self):
-        if not self._capturing_hotkey:
-            return
-        if self._capture_timer:
-            self._capture_timer.cancel()
-        self._capturing_hotkey = False
-        if self._capture_listener:
-            try:
-                self._capture_listener.stop()
-            except Exception:
-                pass
-            self._capture_listener = None
-        self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
-        self.status_item.title = self._idle_title()
-        self._setup_hotkey()
-
-    def _close_menu(self):
-        """Dismiss the status-bar menu programmatically (safe to call from any thread)."""
-        nsm = getattr(self, "_nsm", None)
-        if nsm:
-            try:
-                nsm.performSelectorOnMainThread_withObject_waitUntilDone_(
-                    "cancelTracking", None, False
-                )
-            except Exception:
-                pass
 
     # ------------------------------------------------------------ recording
 
@@ -593,7 +482,6 @@ class WisperApp(rumps.App):
         s = self._update_state
         if s in (None, 0, "error"):
             self._update_state = "checking"
-            self._menu_delegate._check_active = True
             # Safety release so a hung network can't trap the menu forever.
             threading.Timer(15.0, self._unblock_menu).start()
             threading.Thread(target=self._run_update_check, daemon=True).start()
@@ -602,7 +490,7 @@ class WisperApp(rumps.App):
             threading.Thread(target=self._run_install, daemon=True).start()
 
     def _unblock_menu(self):
-        self._menu_delegate._check_active = False
+        pass  # No delegate to unblock; kept for _run_update_check compatibility.
 
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
