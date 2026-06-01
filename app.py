@@ -599,10 +599,16 @@ class WisperApp(rumps.App):
 
     def _run_update_check(self):
         n = check_for_updates(REPO_DIR)
-        self._update_state = n if n >= 0 else "error"
         self._unblock_menu()
-        if n == 0:
+        if n < 0:
+            self._update_state = "error"
+        elif n == 0:
+            self._update_state = 0
             threading.Timer(4.0, self._reset_update_state).start()
+        else:
+            # Updates found — install and restart without requiring a second click.
+            self._update_state = "installing"
+            self._run_install()
 
     def _reset_update_state(self):
         if self._update_state == 0:

@@ -875,11 +875,12 @@ def test_unblock_menu_clears_check_active(wa):
     assert wa._menu_delegate._check_active is False
 
 
-def test_run_update_check_sets_count_on_success(wa):
+def test_run_update_check_auto_installs_when_updates_available(wa):
     with patch("app.check_for_updates", return_value=5):
-        with patch("app.threading.Timer", return_value=MagicMock()):
+        with patch.object(wa, "_run_install") as mock_install:
             wa._run_update_check()
-    assert wa._update_state == 5
+    assert wa._update_state == "installing"
+    mock_install.assert_called_once()
 
 
 def test_run_update_check_sets_error_on_failure(wa):
@@ -898,7 +899,8 @@ def test_run_update_check_zero_schedules_reset_timer(wa):
 def test_run_update_check_nonzero_does_not_schedule_reset(wa):
     with patch("app.check_for_updates", return_value=2):
         with patch("app.threading.Timer", return_value=MagicMock()) as mock_timer:
-            wa._run_update_check()
+            with patch.object(wa, "_run_install"):
+                wa._run_update_check()
     mock_timer.assert_not_called()
 
 
