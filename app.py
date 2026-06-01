@@ -21,7 +21,8 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
 
 from config import APP_DIR, CLEANUP_MODES, MODELS, REPO_DIR, Config
 from history import HistoryDB
-from hotkey import HotkeyManager
+from pynput import keyboard as _kb
+from hotkey import HotkeyManager, key_display_name
 from overlay import create_recording_overlay
 from postprocessor import PostProcessor
 from recorder import AudioRecorder
@@ -110,6 +111,11 @@ class WisperApp(rumps.App):
         self.db = HistoryDB(APP_DIR / "history.db")
         self.overlay = create_recording_overlay(self.recorder.get_waveform)
 
+        # Hotkey capture state
+        self._capturing_hotkey = False
+        self._capture_listener = None
+        self._capture_timer = None
+
         # Flags set by background threads; consumed by main-thread _ui_tick.
         self._needs_history_refresh = False
         self._pending_restore: list | None = None  # clipboard snapshot to restore
@@ -155,8 +161,14 @@ class WisperApp(rumps.App):
 
     # ------------------------------------------------------------------ menu
 
+    def _hotkey_label(self) -> str:
+        return key_display_name(self.config.hotkey_vk, self.config.hotkey_key)
+
+    def _idle_title(self) -> str:
+        return f"Tap {self._hotkey_label()} to record"
+
     def _build_menu(self):
-        self.status_item = rumps.MenuItem("Hold fn to record")
+        self.status_item = rumps.MenuItem(self._idle_title())
 
         self.history_menu = rumps.MenuItem("History")
         self._refresh_history()
@@ -182,6 +194,11 @@ class WisperApp(rumps.App):
             self.cleanup_items[mode] = item
         self._sync_cleanup_checkmarks()
 
+        self.hotkey_item = rumps.MenuItem(
+            f"Hotkey: {self._hotkey_label()}",
+            callback=self._on_set_hotkey,
+        )
+
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
         version_item = rumps.MenuItem(f"Wisper v{VERSION}")
 
@@ -191,6 +208,7 @@ class WisperApp(rumps.App):
             self.history_menu,
             model_menu,
             cleanup_menu,
+            self.hotkey_item,
             None,
             self.update_item,
             None,
@@ -293,7 +311,7 @@ class WisperApp(rumps.App):
         self._recording_started_at = None
         self._mismatch_ticks = 0
         self._pasting = False
-        self.status_item.title = "Hold fn to record"
+        self.status_item.title = self._idle_title()
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("hide:", None, False)
 
     def _sync_update_item(self):
@@ -365,8 +383,75 @@ class WisperApp(rumps.App):
         self.hotkey = HotkeyManager(
             on_start=self._on_fn_down,
             on_stop=self._on_fn_up,
+            vk=self.config.hotkey_vk,
+            key_name=self.config.hotkey_key,
         )
         self.hotkey.start()
+
+    def _on_set_hotkey(self, _):
+        if self._capturing_hotkey:
+            return
+        self._start_hotkey_capture()
+
+    def _start_hotkey_capture(self):
+        self._capturing_hotkey = True
+        self.hotkey.stop()
+        self.status_item.title = "Press a key… (Esc to cancel)"
+        self.hotkey_item.title = "Hotkey: (press a key…)"
+        self._capture_listener = _kb.Listener(on_release=self._on_capture_release)
+        self._capture_listener.daemon = True
+        self._capture_listener.start()
+        self._capture_timer = threading.Timer(10.0, self._cancel_hotkey_capture)
+        self._capture_timer.start()
+
+    def _on_capture_release(self, key):
+        if key == _kb.Key.esc:
+            self._cancel_hotkey_capture()
+            return False
+        # Reject printable character keys — they'd fire on every keystroke while typing.
+        if isinstance(key, _kb.KeyCode) and key.char and key.char.isprintable():
+            rumps.notification(
+                "Wisper",
+                "Invalid hotkey",
+                "Choose a modifier key (Option, Control, Fn) or F-key instead.",
+                sound=False,
+            )
+            self._cancel_hotkey_capture()
+            return False
+        self._finish_hotkey_capture(key)
+        return False
+
+    def _finish_hotkey_capture(self, key):
+        if self._capture_timer:
+            self._capture_timer.cancel()
+        self._capturing_hotkey = False
+        self._capture_listener = None
+        if isinstance(key, _kb.KeyCode) and key.vk is not None:
+            self.config.hotkey_vk = key.vk
+            self.config.hotkey_key = ""
+        elif isinstance(key, _kb.Key):
+            self.config.hotkey_key = key.name
+        self.config.save()
+        self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
+        self.status_item.title = self._idle_title()
+        self._setup_hotkey()
+        logger.info("Hotkey changed to: %s", self._hotkey_label())
+
+    def _cancel_hotkey_capture(self):
+        if not self._capturing_hotkey:
+            return
+        if self._capture_timer:
+            self._capture_timer.cancel()
+        self._capturing_hotkey = False
+        if self._capture_listener:
+            try:
+                self._capture_listener.stop()
+            except Exception:
+                pass
+            self._capture_listener = None
+        self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
+        self.status_item.title = self._idle_title()
+        self._setup_hotkey()
 
     # ------------------------------------------------------------ recording
 
@@ -379,7 +464,7 @@ class WisperApp(rumps.App):
             raise  # re-raise so HotkeyManager rolls back _recording = False
         self._recording_started_at = time.monotonic()
         logger.info("Recording started")
-        self.status_item.title = "Recording… release fn to stop"
+        self.status_item.title = f"Recording… tap {self._hotkey_label()} to stop"
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("show:", None, False)
 
     def _on_fn_up(self):
@@ -388,7 +473,7 @@ class WisperApp(rumps.App):
         audio = self.recorder.stop()
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("hide:", None, False)
 
-        self.status_item.title = "Hold fn to record"
+        self.status_item.title = self._idle_title()
 
         if audio is None or audio_ms < MIN_AUDIO_MS:
             return
@@ -403,10 +488,10 @@ class WisperApp(rumps.App):
         except Exception as exc:
             logger.error("Transcription failed: %s", exc)
             rumps.notification("Wisper", "Transcription failed", str(exc), sound=False)
-            self.status_item.title = "Hold fn to record"
+            self.status_item.title = self._idle_title()
             return
 
-        self.status_item.title = "Hold fn to record"
+        self.status_item.title = self._idle_title()
 
         if not text:
             return

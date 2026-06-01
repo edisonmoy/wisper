@@ -483,7 +483,7 @@ def test_emergency_reset_clears_state_flags(wa):
 
 def test_emergency_reset_updates_status_title(wa):
     wa._emergency_reset()
-    assert wa.status_item.title == "Hold fn to record"
+    assert wa.status_item.title == wa._idle_title()
 
 
 def test_emergency_reset_hides_overlay(wa):
@@ -635,7 +635,7 @@ def test_on_fn_up_transcription_failure_shows_notification(wa):
             with patch.object(wa.transcriber, "transcribe", side_effect=RuntimeError("GPU OOM")):
                 wa._on_fn_up()
     wa._mock_notification.assert_called()
-    assert wa.status_item.title == "Hold fn to record"
+    assert wa.status_item.title == wa._idle_title()
 
 
 def test_on_fn_up_empty_text_skips_paste(wa):
@@ -955,3 +955,136 @@ def test_quit_stops_hotkey(wa):
 def test_quit_calls_quit_application(wa):
     wa._quit(None)
     wa._mock_quit.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# hotkey capture
+# ---------------------------------------------------------------------------
+
+
+def test_hotkey_label_default_is_fn(wa):
+    assert wa._hotkey_label() == "fn"
+
+
+def test_idle_title_contains_hotkey_label(wa):
+    assert wa._hotkey_label() in wa._idle_title()
+
+
+def test_hotkey_item_shows_current_key(wa):
+    assert "fn" in wa.hotkey_item.title
+
+
+def test_on_set_hotkey_starts_capture(wa):
+    with patch.object(wa, "_start_hotkey_capture") as mock_capture:
+        wa._on_set_hotkey(None)
+    mock_capture.assert_called_once()
+
+
+def test_on_set_hotkey_noop_when_already_capturing(wa):
+    wa._capturing_hotkey = True
+    with patch.object(wa, "_start_hotkey_capture") as mock_capture:
+        wa._on_set_hotkey(None)
+    mock_capture.assert_not_called()
+
+
+def test_start_hotkey_capture_stops_listener_and_enters_mode(wa):
+    with patch.object(wa.hotkey, "stop") as mock_stop:
+        with patch("app._kb.Listener", return_value=MagicMock()):
+            with patch("app.threading.Timer", return_value=MagicMock()):
+                wa._start_hotkey_capture()
+    mock_stop.assert_called_once()
+    assert wa._capturing_hotkey is True
+    assert "press a key" in wa.status_item.title.lower()
+
+
+def test_finish_hotkey_capture_vk_key_saves_vk(wa):
+    from pynput import keyboard
+
+    mock_timer = MagicMock()
+    wa._capture_timer = mock_timer
+    wa._capturing_hotkey = True
+    key = keyboard.KeyCode(vk=61)
+    with patch.object(wa, "_setup_hotkey"):
+        wa._finish_hotkey_capture(key)
+    assert wa.config.hotkey_vk == 61
+    assert wa.config.hotkey_key == ""
+    assert not wa._capturing_hotkey
+
+
+def test_finish_hotkey_capture_named_key_saves_name(wa):
+    from pynput import keyboard
+
+    mock_timer = MagicMock()
+    wa._capture_timer = mock_timer
+    wa._capturing_hotkey = True
+    key = keyboard.Key.alt_r
+    with patch.object(wa, "_setup_hotkey"):
+        wa._finish_hotkey_capture(key)
+    assert wa.config.hotkey_key == "alt_r"
+    assert not wa._capturing_hotkey
+
+
+def test_finish_hotkey_capture_updates_menu_and_status(wa):
+    from pynput import keyboard
+
+    mock_timer = MagicMock()
+    wa._capture_timer = mock_timer
+    wa._capturing_hotkey = True
+    key = keyboard.Key.alt_r
+    with patch.object(wa, "_setup_hotkey"):
+        wa._finish_hotkey_capture(key)
+    assert "Right ⌥" in wa.hotkey_item.title
+    assert "Right ⌥" in wa.status_item.title
+
+
+def test_cancel_hotkey_capture_restores_state(wa):
+    mock_timer = MagicMock()
+    mock_listener = MagicMock()
+    wa._capture_timer = mock_timer
+    wa._capture_listener = mock_listener
+    wa._capturing_hotkey = True
+    with patch.object(wa, "_setup_hotkey"):
+        wa._cancel_hotkey_capture()
+    assert not wa._capturing_hotkey
+    mock_listener.stop.assert_called_once()
+    assert wa.status_item.title == wa._idle_title()
+
+
+def test_cancel_hotkey_capture_noop_when_not_capturing(wa):
+    wa._capturing_hotkey = False
+    with patch.object(wa, "_setup_hotkey") as mock_setup:
+        wa._cancel_hotkey_capture()
+    mock_setup.assert_not_called()
+
+
+def test_on_capture_release_esc_cancels(wa):
+    from pynput import keyboard
+
+    wa._capturing_hotkey = True
+    with patch.object(wa, "_cancel_hotkey_capture") as mock_cancel:
+        result = wa._on_capture_release(keyboard.Key.esc)
+    mock_cancel.assert_called_once()
+    assert result is False
+
+
+def test_on_capture_release_printable_char_cancels_with_notification(wa):
+    from pynput import keyboard
+
+    wa._capturing_hotkey = True
+    key = keyboard.KeyCode.from_char("a")
+    with patch.object(wa, "_cancel_hotkey_capture") as mock_cancel:
+        result = wa._on_capture_release(key)
+    mock_cancel.assert_called_once()
+    wa._mock_notification.assert_called()
+    assert result is False
+
+
+def test_on_capture_release_valid_key_finishes_capture(wa):
+    from pynput import keyboard
+
+    wa._capturing_hotkey = True
+    key = keyboard.Key.alt_r
+    with patch.object(wa, "_finish_hotkey_capture") as mock_finish:
+        result = wa._on_capture_release(key)
+    mock_finish.assert_called_once_with(key)
+    assert result is False

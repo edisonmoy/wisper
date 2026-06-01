@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pynput import keyboard
 
-from hotkey import _FN_VK, HotkeyManager, _is_fn
+from hotkey import _FN_VK, HotkeyManager, _is_fn, key_display_name
 
 # ------------------------------------------------------------------ _is_fn
 
@@ -23,6 +23,29 @@ def test_is_fn_special_key():
 
 def test_is_fn_regular_char():
     assert _is_fn(keyboard.KeyCode.from_char("a")) is False
+
+
+# ------------------------------------------------------------------ key_display_name
+
+
+def test_display_name_default_fn():
+    assert key_display_name(63, "") == "fn"
+
+
+def test_display_name_unknown_vk():
+    assert key_display_name(999, "") == "VK 999"
+
+
+def test_display_name_named_key_known():
+    assert key_display_name(63, "alt_r") == "Right ⌥"
+
+
+def test_display_name_named_key_fkey():
+    assert key_display_name(63, "f13") == "F13"
+
+
+def test_display_name_named_key_unknown():
+    assert key_display_name(63, "some_weird_key") == "some_weird_key"
 
 
 # ------------------------------------------------------------------ toggle logic

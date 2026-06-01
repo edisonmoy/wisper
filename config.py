@@ -16,6 +16,8 @@ class Config:
     auto_paste: bool = True
     history_limit: int = 20
     cleanup_mode: str = "regex"
+    hotkey_vk: int = 63   # macOS virtual key code; 63 = built-in Fn/Globe key
+    hotkey_key: str = ""  # pynput Key name (e.g. "alt_r"); if set, overrides hotkey_vk
 
     def __post_init__(self):
         if self.model not in MODELS:
@@ -24,6 +26,10 @@ class Config:
             self.cleanup_mode = "regex"
         if not isinstance(self.history_limit, int) or not (1 <= self.history_limit <= 100):
             self.history_limit = 20
+        if not isinstance(self.hotkey_vk, int) or self.hotkey_vk < 0:
+            self.hotkey_vk = 63
+        if not isinstance(self.hotkey_key, str):
+            self.hotkey_key = ""
 
     @classmethod
     def load(cls) -> "Config":
