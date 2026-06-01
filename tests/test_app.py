@@ -83,7 +83,6 @@ class TestMenuDelegate:
     def test_initial_state(self):
         d = self._delegate()
         assert d._hover_on_update is False
-        assert d._hover_on_hotkey is False
         assert d._check_active is False
         assert d.update_nsitem is None
         assert d.hotkey_nsitem is None
@@ -102,13 +101,26 @@ class TestMenuDelegate:
         d._check_active = True
         assert d.menuShouldClose_(None) is False
 
+    def test_menu_should_close_false_when_hotkey_item_highlighted(self):
+        d = self._delegate()
+        nsitem = MagicMock()
+        d.hotkey_nsitem = nsitem
+        mock_menu = MagicMock()
+        mock_menu.highlightedItem.return_value = nsitem
+        assert d.menuShouldClose_(mock_menu) is False
+
+    def test_menu_should_close_true_when_different_item_highlighted(self):
+        d = self._delegate()
+        d.hotkey_nsitem = MagicMock()
+        mock_menu = MagicMock()
+        mock_menu.highlightedItem.return_value = MagicMock()  # different item
+        assert d.menuShouldClose_(mock_menu) is True
+
     def test_menu_did_close_resets_hover(self):
         d = self._delegate()
         d._hover_on_update = True
-        d._hover_on_hotkey = True
         d.menuDidClose_(None)
         assert d._hover_on_update is False
-        assert d._hover_on_hotkey is False
 
     def test_highlight_sets_hover_when_on_update_item(self):
         d = self._delegate()
@@ -145,18 +157,6 @@ class TestMenuDelegate:
         d._hover_on_update = True
         d.menu_willHighlightItem_(None, None)
         assert d._hover_on_update is False
-
-    def test_highlight_sets_hover_on_hotkey_item(self):
-        d = self._delegate()
-        item = MagicMock()
-        d.hotkey_nsitem = item
-        d.menu_willHighlightItem_(None, item)
-        assert d._hover_on_hotkey is True
-
-    def test_menu_should_close_false_when_hovering_hotkey(self):
-        d = self._delegate()
-        d._hover_on_hotkey = True
-        assert d.menuShouldClose_(None) is False
 
 
 # ---------------------------------------------------------------------------

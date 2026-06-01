@@ -75,32 +75,31 @@ class _MenuDelegate(AppKit.NSObject):
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
         self._hover_on_update = False  # cursor is over the update item
-        self._hover_on_hotkey = False   # cursor is over the hotkey item
         self._check_active = False  # a check/install or hotkey capture is in progress
         self.update_nsitem = None  # set by WisperApp after menu is built
         self.hotkey_nsitem = None  # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
-        return not (self._hover_on_update or self._hover_on_hotkey or self._check_active)
+        if self._hover_on_update or self._check_active:
+            return False
+        # Check highlighted item at click time — more reliable than willHighlightItem_
+        # for regular menu items because it reads state at the exact moment of the call.
+        if self.hotkey_nsitem is not None and _menu is not None:
+            try:
+                if _menu.highlightedItem() == self.hotkey_nsitem:
+                    return False
+            except Exception:
+                pass
+        return True
 
     def menuDidClose_(self, _menu):
         self._hover_on_update = False
-        self._hover_on_hotkey = False
 
     def menu_willHighlightItem_(self, menu, item):
-        if self._check_active:
+        if self.update_nsitem is None or self._check_active:
             return
-        self._hover_on_update = (
-            self.update_nsitem is not None
-            and item is not None
-            and item == self.update_nsitem
-        )
-        self._hover_on_hotkey = (
-            self.hotkey_nsitem is not None
-            and item is not None
-            and item == self.hotkey_nsitem
-        )
+        self._hover_on_update = item is not None and item == self.update_nsitem
 
 
 class WisperApp(rumps.App):
