@@ -296,6 +296,8 @@ def test_configure_nsapp_skips_image_when_no_button(wa):
 
 
 def test_configure_nsapp_sets_delegate_when_menu_present(wa):
+    # Simulate the case where _build_menu's early setup failed (no _nsm yet).
+    wa._nsm = None
     wa._nsapp = MagicMock()
     wa._nsapp.nsstatusitem.button.return_value = None
     nsm = MagicMock()

@@ -216,6 +216,10 @@ class WisperApp(rumps.App):
             f"Hotkey: {self._hotkey_label()}",
             callback=self._on_set_hotkey,
         )
+        # Set tag immediately so willHighlightItem_ can identify this item
+        # even before _configure_nsapp runs (which may be too late if nssi.menu()
+        # returns None on the first deferred tick).
+        self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
 
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
 
@@ -230,6 +234,17 @@ class WisperApp(rumps.App):
             self.update_item,
             rumps.MenuItem("Quit Wisper", callback=self._quit),
         ]
+
+        # Wire delegate directly to the backing NSMenu now — this is the same
+        # NSMenu that rumps will hand to NSStatusItem, so setDelegate_ here is
+        # equivalent to doing it after the run loop starts.
+        try:
+            nsm = self.menu._menu
+            nsm.setDelegate_(self._menu_delegate)
+            self._menu_delegate.update_nsitem = self.update_item._menuitem
+            self._nsm = nsm
+        except Exception:
+            pass  # will be retried in _configure_nsapp
 
     def _sync_model_checkmarks(self):
         for m, item in self.model_items.items():
@@ -257,12 +272,15 @@ class WisperApp(rumps.App):
         if btn is not None:
             btn.setImage_(_make_menubar_image())
             btn.setTitle_("")
-        nsm = nssi.menu()
-        if nsm:
-            nsm.setDelegate_(self._menu_delegate)
-            self._menu_delegate.update_nsitem = self.update_item._menuitem
-            self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
-            self._nsm = nsm  # for programmatic menu close after hotkey capture
+        # Delegate and tag are already set in _build_menu via self.menu._menu.
+        # Re-apply here only if that earlier attempt failed (e.g. _nsm not set).
+        if not getattr(self, "_nsm", None):
+            nsm = nssi.menu()
+            if nsm:
+                nsm.setDelegate_(self._menu_delegate)
+                self._menu_delegate.update_nsitem = self.update_item._menuitem
+                self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
+                self._nsm = nsm
 
     def _ui_tick(self, _):
         if not self._nsapp_configured:
