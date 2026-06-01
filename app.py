@@ -70,30 +70,25 @@ _HOTKEY_ITEM_TAG = 9001
 
 
 class _MenuDelegate(AppKit.NSObject):
-    """NSMenu delegate that keeps the menu open during an async update check
-    or hotkey capture.
+    """NSMenu delegate that keeps the menu open during an async update check.
 
     menuShouldClose_ fires during the click event — before the Python
-    callback runs — so blocking flags must be set earlier, in
+    callback runs — so the blocking flag must be set earlier, in
     willHighlightItem_, while the cursor is hovering over the item.
-    The update item uses NSMenuItem identity; the hotkey item uses an
-    integer tag so we avoid PyObjC object-comparison edge cases.
     """
 
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
         self._hover_on_update = False  # cursor is over the update item
-        self._hover_on_hotkey = False  # cursor is over the hotkey item
-        self._check_active = False  # async operation (update/capture) in progress
+        self._check_active = False  # async update check in progress
         self.update_nsitem = None  # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
-        return not (self._hover_on_update or self._hover_on_hotkey or self._check_active)
+        return not (self._hover_on_update or self._check_active)
 
     def menuDidClose_(self, _menu):
         self._hover_on_update = False
-        self._hover_on_hotkey = False
 
     def menu_willHighlightItem_(self, menu, item):
         if self._check_active:
@@ -103,10 +98,6 @@ class _MenuDelegate(AppKit.NSObject):
             and item is not None
             and item == self.update_nsitem
         )
-        try:
-            self._hover_on_hotkey = item is not None and item.tag() == _HOTKEY_ITEM_TAG
-        except Exception:
-            self._hover_on_hotkey = False
 
 
 class WisperApp(rumps.App):
@@ -430,7 +421,6 @@ class WisperApp(rumps.App):
 
     def _start_hotkey_capture(self):
         self._capturing_hotkey = True
-        self._menu_delegate._check_active = True  # keep menu open
         self.hotkey.stop()
         self.status_item.title = "Press a key… (Esc to cancel)"
         self.hotkey_item.title = "Hotkey: (press a key…)"
@@ -470,8 +460,6 @@ class WisperApp(rumps.App):
         self.config.save()
         self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
         self.status_item.title = self._idle_title()
-        self._menu_delegate._check_active = False
-        self._close_menu()
         self._setup_hotkey()
         logger.info("Hotkey changed to: %s", self._hotkey_label())
 
@@ -489,8 +477,6 @@ class WisperApp(rumps.App):
             self._capture_listener = None
         self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
         self.status_item.title = self._idle_title()
-        self._menu_delegate._check_active = False
-        self._close_menu()
         self._setup_hotkey()
 
     def _close_menu(self):

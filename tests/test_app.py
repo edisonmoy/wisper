@@ -83,7 +83,6 @@ class TestMenuDelegate:
     def test_initial_state(self):
         d = self._delegate()
         assert d._hover_on_update is False
-        assert d._hover_on_hotkey is False
         assert d._check_active is False
         assert d.update_nsitem is None
 
@@ -96,11 +95,6 @@ class TestMenuDelegate:
         d._hover_on_update = True
         assert d.menuShouldClose_(None) is False
 
-    def test_menu_should_close_false_when_hovering_hotkey(self):
-        d = self._delegate()
-        d._hover_on_hotkey = True
-        assert d.menuShouldClose_(None) is False
-
     def test_menu_should_close_false_when_check_active(self):
         d = self._delegate()
         d._check_active = True
@@ -109,10 +103,8 @@ class TestMenuDelegate:
     def test_menu_did_close_resets_hover(self):
         d = self._delegate()
         d._hover_on_update = True
-        d._hover_on_hotkey = True
         d.menuDidClose_(None)
         assert d._hover_on_update is False
-        assert d._hover_on_hotkey is False
 
     def test_highlight_sets_hover_when_on_update_item(self):
         d = self._delegate()
@@ -143,21 +135,6 @@ class TestMenuDelegate:
         d._hover_on_update = True
         d.menu_willHighlightItem_(None, None)
         assert d._hover_on_update is False
-
-    def test_highlight_sets_hover_hotkey_by_tag(self):
-        d = self._delegate()
-        item = MagicMock()
-        item.tag.return_value = _HOTKEY_ITEM_TAG
-        d.menu_willHighlightItem_(None, item)
-        assert d._hover_on_hotkey is True
-
-    def test_highlight_clears_hotkey_hover_when_wrong_tag(self):
-        d = self._delegate()
-        d._hover_on_hotkey = True
-        item = MagicMock()
-        item.tag.return_value = 0  # different tag
-        d.menu_willHighlightItem_(None, item)
-        assert d._hover_on_hotkey is False
 
 
 # ---------------------------------------------------------------------------
@@ -1017,7 +994,6 @@ def test_start_hotkey_capture_stops_listener_and_enters_mode(wa):
                 wa._start_hotkey_capture()
     mock_stop.assert_called_once()
     assert wa._capturing_hotkey is True
-    assert wa._menu_delegate._check_active is True
     assert "press a key" in wa.status_item.title.lower()
 
 
