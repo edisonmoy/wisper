@@ -50,11 +50,14 @@ def _is_named_key(key, name: str) -> bool:
 
 
 class HotkeyManager:
-    """Toggle recording on each fn key event.
+    """Push-to-talk recording triggered by a configurable hotkey.
 
-    _busy blocks new toggles until the current on_start/on_stop callback
-    returns, preventing the flag from getting out of sync with the recorder
-    when the user taps fn faster than the callback can complete.
+    For the built-in Fn key (VK 63), macOS fires NSFlagsChanged for both
+    press and release as on_release events, so toggle mode is used instead.
+    All other keys use true push-to-talk: on_press starts, on_release stops.
+
+    _busy blocks re-entrancy: a new press/toggle is ignored until the
+    current on_start/on_stop callback returns.
     """
 
     def __init__(self, on_start: Callable, on_stop: Callable, vk: int = _FN_VK, key_name: str = ""):
@@ -62,13 +65,24 @@ class HotkeyManager:
         self.on_stop = on_stop
         self._vk = vk
         self._key_name = key_name
+        # Fn key can't distinguish press from release — use toggle as push-to-talk proxy.
+        self._toggle_mode = not key_name and vk == _FN_VK
         self._listener: keyboard.Listener | None = None
         self._recording = False
         self._busy = False
         self._last_event = 0.0
 
+    def _matches(self, key) -> bool:
+        return _is_named_key(key, self._key_name) if self._key_name else _is_fn(key, self._vk)
+
     def start(self):
-        self._listener = keyboard.Listener(on_release=self._on_release)
+        if self._toggle_mode:
+            self._listener = keyboard.Listener(on_release=self._on_release)
+        else:
+            self._listener = keyboard.Listener(
+                on_press=self._on_press,
+                on_release=self._on_release,
+            )
         self._listener.daemon = True
         self._listener.start()
 
@@ -77,11 +91,45 @@ class HotkeyManager:
             self._listener.stop()
             self._listener = None
 
+    def _on_press(self, key):
+        """Push-to-talk: start recording on key down."""
+        if not self._matches(key):
+            return
+        if self._recording or self._busy:
+            return
+        self._recording = True
+        self._busy = True
+
+        def _run():
+            try:
+                self.on_start()
+            except Exception:
+                self._recording = False
+            finally:
+                self._busy = False
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def _on_release(self, key):
-        matched = _is_named_key(key, self._key_name) if self._key_name else _is_fn(key, self._vk)
-        if not matched:
+        if not self._matches(key):
             return
 
+        if not self._toggle_mode:
+            # Push-to-talk: stop recording on key up.
+            if not self._recording:
+                return
+            self._recording = False
+
+            def _run():
+                try:
+                    self.on_stop()
+                except Exception:
+                    pass
+
+            threading.Thread(target=_run, daemon=True).start()
+            return
+
+        # Toggle mode (Fn key only): each NSFlagsChanged event alternates start/stop.
         now = time.monotonic()
         if now - self._last_event < _DEBOUNCE_S:
             return  # absorb duplicate/rapid-fire NSFlagsChanged events

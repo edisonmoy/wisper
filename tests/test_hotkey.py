@@ -105,14 +105,29 @@ def test_recording_state_toggles(mgr):
 # ------------------------------------------------------------------ start / stop
 
 
-def test_start_launches_listener(mgr):
+def test_start_launches_listener_toggle_mode(mgr):
+    """Toggle-mode (Fn key) listener is started with only on_release."""
     with patch("hotkey.keyboard.Listener") as MockListener:
         mock = MagicMock()
         MockListener.return_value = mock
         mgr.start()
-        MockListener.assert_called_once()
+        _, kwargs = MockListener.call_args
+        assert "on_release" in kwargs
+        assert "on_press" not in kwargs
         mock.start.assert_called_once()
         assert mock.daemon is True
+
+
+def test_start_launches_listener_push_to_talk_mode():
+    """Push-to-talk listener is started with both on_press and on_release."""
+    ptt = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock(), key_name="alt_r")
+    with patch("hotkey.keyboard.Listener") as MockListener:
+        mock = MagicMock()
+        MockListener.return_value = mock
+        ptt.start()
+        _, kwargs = MockListener.call_args
+        assert "on_press" in kwargs
+        assert "on_release" in kwargs
 
 
 def test_stop_halts_listener(mgr):
@@ -174,3 +189,71 @@ def test_busy_flag_blocks_release(mgr):
     mgr._on_release(FN)
     time.sleep(0.05)
     mgr.on_start.assert_not_called()
+
+
+# ------------------------------------------------------------------ push-to-talk
+
+
+@pytest.fixture
+def ptt():
+    """HotkeyManager in push-to-talk mode (non-Fn key)."""
+    return HotkeyManager(on_start=MagicMock(), on_stop=MagicMock(), key_name="alt_r")
+
+
+ALT_R = keyboard.Key.alt_r
+
+
+def test_ptt_press_starts_recording(ptt):
+    ptt._on_press(ALT_R)
+    time.sleep(0.05)
+    ptt.on_start.assert_called_once()
+    ptt.on_stop.assert_not_called()
+
+
+def test_ptt_release_stops_recording(ptt):
+    ptt._on_press(ALT_R)
+    time.sleep(0.05)
+    ptt._on_release(ALT_R)
+    time.sleep(0.05)
+    ptt.on_stop.assert_called_once()
+
+
+def test_ptt_release_without_press_is_noop(ptt):
+    ptt._on_release(ALT_R)
+    time.sleep(0.05)
+    ptt.on_stop.assert_not_called()
+
+
+def test_ptt_double_press_ignored(ptt):
+    ptt._on_press(ALT_R)
+    time.sleep(0.05)
+    ptt._on_press(ALT_R)  # already recording
+    time.sleep(0.05)
+    assert ptt.on_start.call_count == 1
+
+
+def test_ptt_non_matching_key_ignored(ptt):
+    ptt._on_press(keyboard.Key.space)
+    time.sleep(0.05)
+    ptt.on_start.assert_not_called()
+
+
+def test_ptt_toggle_mode_false_for_named_key(ptt):
+    assert ptt._toggle_mode is False
+
+
+def test_toggle_mode_true_for_fn_key(mgr):
+    assert mgr._toggle_mode is True
+
+
+def test_toggle_mode_false_for_custom_vk():
+    m = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock(), vk=61)
+    assert m._toggle_mode is False
+
+
+def test_ptt_on_start_exception_rolls_back_recording(ptt):
+    ptt.on_start.side_effect = RuntimeError("mic fail")
+    ptt._on_press(ALT_R)
+    time.sleep(0.15)
+    assert ptt._recording is False
+    assert ptt._busy is False

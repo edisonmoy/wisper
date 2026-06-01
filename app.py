@@ -75,20 +75,32 @@ class _MenuDelegate(AppKit.NSObject):
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
         self._hover_on_update = False  # cursor is over the update item
-        self._check_active = False  # a check/install is in progress
+        self._hover_on_hotkey = False   # cursor is over the hotkey item
+        self._check_active = False  # a check/install or hotkey capture is in progress
         self.update_nsitem = None  # set by WisperApp after menu is built
+        self.hotkey_nsitem = None  # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
-        return not (self._hover_on_update or self._check_active)
+        return not (self._hover_on_update or self._hover_on_hotkey or self._check_active)
 
     def menuDidClose_(self, _menu):
         self._hover_on_update = False
+        self._hover_on_hotkey = False
 
     def menu_willHighlightItem_(self, menu, item):
-        if self.update_nsitem is None or self._check_active:
+        if self._check_active:
             return
-        self._hover_on_update = item is not None and item == self.update_nsitem
+        self._hover_on_update = (
+            self.update_nsitem is not None
+            and item is not None
+            and item == self.update_nsitem
+        )
+        self._hover_on_hotkey = (
+            self.hotkey_nsitem is not None
+            and item is not None
+            and item == self.hotkey_nsitem
+        )
 
 
 class WisperApp(rumps.App):
@@ -246,6 +258,8 @@ class WisperApp(rumps.App):
         if nsm:
             nsm.setDelegate_(self._menu_delegate)
             self._menu_delegate.update_nsitem = self.update_item._menuitem
+            self._menu_delegate.hotkey_nsitem = self.hotkey_item._menuitem
+            self._nsm = nsm  # for programmatic menu close after hotkey capture
 
     def _ui_tick(self, _):
         if not self._nsapp_configured:
@@ -395,6 +409,7 @@ class WisperApp(rumps.App):
 
     def _start_hotkey_capture(self):
         self._capturing_hotkey = True
+        self._menu_delegate._check_active = True  # keep menu open
         self.hotkey.stop()
         self.status_item.title = "Press a key… (Esc to cancel)"
         self.hotkey_item.title = "Hotkey: (press a key…)"
@@ -434,6 +449,8 @@ class WisperApp(rumps.App):
         self.config.save()
         self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
         self.status_item.title = self._idle_title()
+        self._menu_delegate._check_active = False
+        self._close_menu()
         self._setup_hotkey()
         logger.info("Hotkey changed to: %s", self._hotkey_label())
 
@@ -451,7 +468,20 @@ class WisperApp(rumps.App):
             self._capture_listener = None
         self.hotkey_item.title = f"Hotkey: {self._hotkey_label()}"
         self.status_item.title = self._idle_title()
+        self._menu_delegate._check_active = False
+        self._close_menu()
         self._setup_hotkey()
+
+    def _close_menu(self):
+        """Dismiss the status-bar menu programmatically (safe to call from any thread)."""
+        nsm = getattr(self, "_nsm", None)
+        if nsm:
+            try:
+                nsm.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "cancelTracking", None, False
+                )
+            except Exception:
+                pass
 
     # ------------------------------------------------------------ recording
 

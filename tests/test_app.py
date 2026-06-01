@@ -83,8 +83,10 @@ class TestMenuDelegate:
     def test_initial_state(self):
         d = self._delegate()
         assert d._hover_on_update is False
+        assert d._hover_on_hotkey is False
         assert d._check_active is False
         assert d.update_nsitem is None
+        assert d.hotkey_nsitem is None
 
     def test_menu_should_close_true_when_idle(self):
         d = self._delegate()
@@ -103,8 +105,10 @@ class TestMenuDelegate:
     def test_menu_did_close_resets_hover(self):
         d = self._delegate()
         d._hover_on_update = True
+        d._hover_on_hotkey = True
         d.menuDidClose_(None)
         assert d._hover_on_update is False
+        assert d._hover_on_hotkey is False
 
     def test_highlight_sets_hover_when_on_update_item(self):
         d = self._delegate()
@@ -141,6 +145,18 @@ class TestMenuDelegate:
         d._hover_on_update = True
         d.menu_willHighlightItem_(None, None)
         assert d._hover_on_update is False
+
+    def test_highlight_sets_hover_on_hotkey_item(self):
+        d = self._delegate()
+        item = MagicMock()
+        d.hotkey_nsitem = item
+        d.menu_willHighlightItem_(None, item)
+        assert d._hover_on_hotkey is True
+
+    def test_menu_should_close_false_when_hovering_hotkey(self):
+        d = self._delegate()
+        d._hover_on_hotkey = True
+        assert d.menuShouldClose_(None) is False
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +214,7 @@ def test_update_state_setter_from_thread(wa):
 
 def test_build_menu_creates_status_item(wa):
     assert wa.status_item is not None
-    assert "fn" in wa.status_item.title.lower()
+    assert wa._hotkey_label() in wa.status_item.title
 
 
 def test_build_menu_creates_history_menu(wa):
@@ -962,8 +978,10 @@ def test_quit_calls_quit_application(wa):
 # ---------------------------------------------------------------------------
 
 
-def test_hotkey_label_default_is_fn(wa):
-    assert wa._hotkey_label() == "fn"
+def test_hotkey_label_reflects_config(wa):
+    from hotkey import key_display_name
+
+    assert wa._hotkey_label() == key_display_name(wa.config.hotkey_vk, wa.config.hotkey_key)
 
 
 def test_idle_title_contains_hotkey_label(wa):
@@ -971,7 +989,7 @@ def test_idle_title_contains_hotkey_label(wa):
 
 
 def test_hotkey_item_shows_current_key(wa):
-    assert "fn" in wa.hotkey_item.title
+    assert wa._hotkey_label() in wa.hotkey_item.title
 
 
 def test_on_set_hotkey_starts_capture(wa):
@@ -994,7 +1012,34 @@ def test_start_hotkey_capture_stops_listener_and_enters_mode(wa):
                 wa._start_hotkey_capture()
     mock_stop.assert_called_once()
     assert wa._capturing_hotkey is True
+    assert wa._menu_delegate._check_active is True
     assert "press a key" in wa.status_item.title.lower()
+
+
+def test_finish_hotkey_capture_unblocks_menu(wa):
+    from pynput import keyboard
+
+    wa._capture_timer = MagicMock()
+    wa._capturing_hotkey = True
+    with patch.object(wa, "_setup_hotkey"):
+        with patch.object(wa, "_close_menu"):
+            wa._finish_hotkey_capture(keyboard.Key.alt_r)
+    assert wa._menu_delegate._check_active is False
+
+
+def test_cancel_hotkey_capture_unblocks_menu(wa):
+    wa._capture_timer = MagicMock()
+    wa._capture_listener = MagicMock()
+    wa._capturing_hotkey = True
+    with patch.object(wa, "_setup_hotkey"):
+        with patch.object(wa, "_close_menu"):
+            wa._cancel_hotkey_capture()
+    assert wa._menu_delegate._check_active is False
+
+
+def test_close_menu_noop_without_nsm(wa):
+    wa._nsm = None
+    wa._close_menu()  # must not raise
 
 
 def test_finish_hotkey_capture_vk_key_saves_vk(wa):
