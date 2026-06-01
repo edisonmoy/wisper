@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_mod
-from app import VERSION, WisperApp, _make_menubar_image, _MenuDelegate
+from app import VERSION, WisperApp, _make_menubar_image, _MenuDelegate, _HOTKEY_ITEM_TAG
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -83,17 +83,22 @@ class TestMenuDelegate:
     def test_initial_state(self):
         d = self._delegate()
         assert d._hover_on_update is False
+        assert d._hover_on_hotkey is False
         assert d._check_active is False
         assert d.update_nsitem is None
-        assert d.hotkey_nsitem is None
 
     def test_menu_should_close_true_when_idle(self):
         d = self._delegate()
         assert d.menuShouldClose_(None) is True
 
-    def test_menu_should_close_false_when_hovering(self):
+    def test_menu_should_close_false_when_hovering_update(self):
         d = self._delegate()
         d._hover_on_update = True
+        assert d.menuShouldClose_(None) is False
+
+    def test_menu_should_close_false_when_hovering_hotkey(self):
+        d = self._delegate()
+        d._hover_on_hotkey = True
         assert d.menuShouldClose_(None) is False
 
     def test_menu_should_close_false_when_check_active(self):
@@ -101,26 +106,13 @@ class TestMenuDelegate:
         d._check_active = True
         assert d.menuShouldClose_(None) is False
 
-    def test_menu_should_close_false_when_hotkey_item_highlighted(self):
-        d = self._delegate()
-        nsitem = MagicMock()
-        d.hotkey_nsitem = nsitem
-        mock_menu = MagicMock()
-        mock_menu.highlightedItem.return_value = nsitem
-        assert d.menuShouldClose_(mock_menu) is False
-
-    def test_menu_should_close_true_when_different_item_highlighted(self):
-        d = self._delegate()
-        d.hotkey_nsitem = MagicMock()
-        mock_menu = MagicMock()
-        mock_menu.highlightedItem.return_value = MagicMock()  # different item
-        assert d.menuShouldClose_(mock_menu) is True
-
     def test_menu_did_close_resets_hover(self):
         d = self._delegate()
         d._hover_on_update = True
+        d._hover_on_hotkey = True
         d.menuDidClose_(None)
         assert d._hover_on_update is False
+        assert d._hover_on_hotkey is False
 
     def test_highlight_sets_hover_when_on_update_item(self):
         d = self._delegate()
@@ -133,12 +125,6 @@ class TestMenuDelegate:
         d = self._delegate()
         d.update_nsitem = MagicMock()
         d._hover_on_update = True
-        d.menu_willHighlightItem_(None, MagicMock())
-        assert d._hover_on_update is False
-
-    def test_highlight_noop_when_update_nsitem_is_none(self):
-        d = self._delegate()
-        d.update_nsitem = None
         d.menu_willHighlightItem_(None, MagicMock())
         assert d._hover_on_update is False
 
@@ -157,6 +143,21 @@ class TestMenuDelegate:
         d._hover_on_update = True
         d.menu_willHighlightItem_(None, None)
         assert d._hover_on_update is False
+
+    def test_highlight_sets_hover_hotkey_by_tag(self):
+        d = self._delegate()
+        item = MagicMock()
+        item.tag.return_value = _HOTKEY_ITEM_TAG
+        d.menu_willHighlightItem_(None, item)
+        assert d._hover_on_hotkey is True
+
+    def test_highlight_clears_hotkey_hover_when_wrong_tag(self):
+        d = self._delegate()
+        d._hover_on_hotkey = True
+        item = MagicMock()
+        item.tag.return_value = 0  # different tag
+        d.menu_willHighlightItem_(None, item)
+        assert d._hover_on_hotkey is False
 
 
 # ---------------------------------------------------------------------------

@@ -64,42 +64,49 @@ def _make_menubar_image():
     return img
 
 
+# Unique NSMenuItem tag used to identify the hotkey item in willHighlightItem_.
+# Avoids PyObjC NSMenuItem identity-comparison issues.
+_HOTKEY_ITEM_TAG = 9001
+
+
 class _MenuDelegate(AppKit.NSObject):
-    """NSMenu delegate that keeps the menu open during an async update check.
+    """NSMenu delegate that keeps the menu open during an async update check
+    or hotkey capture.
 
     menuShouldClose_ fires during the click event — before the Python
-    callback runs — so _block must be set earlier, in willHighlightItem_,
-    while the cursor is hovering over the update item.
+    callback runs — so blocking flags must be set earlier, in
+    willHighlightItem_, while the cursor is hovering over the item.
+    The update item uses NSMenuItem identity; the hotkey item uses an
+    integer tag so we avoid PyObjC object-comparison edge cases.
     """
 
     def init(self):
         self = objc.super(_MenuDelegate, self).init()
         self._hover_on_update = False  # cursor is over the update item
-        self._check_active = False  # a check/install or hotkey capture is in progress
+        self._hover_on_hotkey = False  # cursor is over the hotkey item
+        self._check_active = False  # async operation (update/capture) in progress
         self.update_nsitem = None  # set by WisperApp after menu is built
-        self.hotkey_nsitem = None  # set by WisperApp after menu is built
         return self
 
     def menuShouldClose_(self, _menu):
-        if self._hover_on_update or self._check_active:
-            return False
-        # Check highlighted item at click time — more reliable than willHighlightItem_
-        # for regular menu items because it reads state at the exact moment of the call.
-        if self.hotkey_nsitem is not None and _menu is not None:
-            try:
-                if _menu.highlightedItem() == self.hotkey_nsitem:
-                    return False
-            except Exception:
-                pass
-        return True
+        return not (self._hover_on_update or self._hover_on_hotkey or self._check_active)
 
     def menuDidClose_(self, _menu):
         self._hover_on_update = False
+        self._hover_on_hotkey = False
 
     def menu_willHighlightItem_(self, menu, item):
-        if self.update_nsitem is None or self._check_active:
+        if self._check_active:
             return
-        self._hover_on_update = item is not None and item == self.update_nsitem
+        self._hover_on_update = (
+            self.update_nsitem is not None
+            and item is not None
+            and item == self.update_nsitem
+        )
+        try:
+            self._hover_on_hotkey = item is not None and item.tag() == _HOTKEY_ITEM_TAG
+        except Exception:
+            self._hover_on_hotkey = False
 
 
 class WisperApp(rumps.App):
@@ -254,7 +261,7 @@ class WisperApp(rumps.App):
         if nsm:
             nsm.setDelegate_(self._menu_delegate)
             self._menu_delegate.update_nsitem = self.update_item._menuitem
-            self._menu_delegate.hotkey_nsitem = self.hotkey_item._menuitem
+            self.hotkey_item._menuitem.setTag_(_HOTKEY_ITEM_TAG)
             self._nsm = nsm  # for programmatic menu close after hotkey capture
 
     def _ui_tick(self, _):
