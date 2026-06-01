@@ -212,7 +212,6 @@ class WisperApp(rumps.App):
         )
 
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
-        version_item = rumps.MenuItem(f"Wisper v{VERSION}")
 
         self.menu = [
             self.status_item,
@@ -223,8 +222,6 @@ class WisperApp(rumps.App):
             self.hotkey_item,
             None,
             self.update_item,
-            None,
-            version_item,
             rumps.MenuItem("Quit Wisper", callback=self._quit),
         ]
 
