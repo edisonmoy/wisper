@@ -63,3 +63,23 @@ def test_post_init_corrects_invalid_cleanup_mode():
 def test_post_init_corrects_out_of_range_history_limit():
     cfg = Config(history_limit=999)
     assert cfg.history_limit == 20
+
+
+def test_mic_name_defaults_to_empty_string():
+    cfg = Config()
+    assert cfg.mic_name == ""
+
+
+def test_post_init_corrects_invalid_mic_name():
+    cfg = Config(mic_name=42)
+    assert cfg.mic_name == ""
+
+
+def test_mic_name_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "APP_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "CONFIG_FILE", tmp_path / "config.json")
+
+    cfg = Config(mic_name="AirPods Pro")
+    cfg.save()
+    loaded = Config.load()
+    assert loaded.mic_name == "AirPods Pro"

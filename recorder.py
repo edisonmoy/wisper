@@ -16,6 +16,7 @@ class AudioRecorder:
         self._buffer: list[np.ndarray] = []
         self._stream = None
         self._lock = threading.Lock()
+        self.device: str | None = None  # None = system default
         self._waveform: collections.deque = collections.deque(
             [0.0] * WAVEFORM_BARS, maxlen=WAVEFORM_BARS
         )
@@ -42,6 +43,7 @@ class AudioRecorder:
                 dtype=DTYPE,
                 callback=self._callback,
                 blocksize=1024,
+                device=self.device,
             )
             self._stream.start()
 

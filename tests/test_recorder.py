@@ -104,6 +104,29 @@ def test_is_recording_property(recorder):
     assert recorder.is_recording is True
 
 
+def test_device_defaults_to_none(recorder):
+    assert recorder.device is None
+
+
+def test_start_passes_device_to_inputstream(recorder):
+    recorder.device = "AirPods Pro"
+    mock_sd = MagicMock()
+    mock_sd.InputStream.return_value = MagicMock()
+    with _mock_sd(mock_sd):
+        recorder.start()
+    _, kwargs = mock_sd.InputStream.call_args
+    assert kwargs["device"] == "AirPods Pro"
+
+
+def test_start_passes_none_device_when_unset(recorder):
+    mock_sd = MagicMock()
+    mock_sd.InputStream.return_value = MagicMock()
+    with _mock_sd(mock_sd):
+        recorder.start()
+    _, kwargs = mock_sd.InputStream.call_args
+    assert kwargs["device"] is None
+
+
 def test_start_while_already_recording_is_noop(recorder):
     """start() while already recording must not reset the buffer or re-open a stream."""
     recorder._recording = True

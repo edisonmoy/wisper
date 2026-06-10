@@ -35,6 +35,15 @@ VERSION = "1.0.0"
 
 # Preset hotkey options shown in the Hotkey submenu.
 # Each entry: (display_name, hotkey_vk, hotkey_key)
+def _get_input_devices() -> list[str]:
+    """Return names of available input devices; returns [] if sounddevice is unavailable."""
+    try:
+        import sounddevice as sd
+        return [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
+    except Exception:
+        return []
+
+
 _HOTKEY_PRESETS = [
     ("fn  (built-in Globe key)", 63, ""),
     ("Right ⌥  Option", 0, "alt_r"),
@@ -92,6 +101,7 @@ class WisperApp(rumps.App):
         logger.setLevel(logging.INFO)
 
         self.recorder = AudioRecorder()
+        self.recorder.device = self.config.mic_name or None
         self.transcriber = Transcriber(self.config.model)
         self.postprocessor = PostProcessor(self.config)
         self.db = HistoryDB(APP_DIR / "history.db")
@@ -183,6 +193,10 @@ class WisperApp(rumps.App):
         self.hotkey_menu = hotkey_menu
         self._sync_hotkey_checkmarks()
 
+        self.mic_items: dict[str, rumps.MenuItem] = {}
+        self.mic_menu = rumps.MenuItem(self._mic_label())
+        self._build_mic_submenu()
+
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
 
         self.menu = [
@@ -192,6 +206,7 @@ class WisperApp(rumps.App):
             model_menu,
             cleanup_menu,
             self.hotkey_menu,
+            self.mic_menu,
             None,
             self.update_item,
             rumps.MenuItem("Quit Wisper", callback=self._quit),
@@ -380,6 +395,42 @@ class WisperApp(rumps.App):
         self._sync_hotkey_checkmarks()
         self._setup_hotkey()
         logger.info("Hotkey changed to: %s", self._hotkey_label())
+
+    def _mic_label(self) -> str:
+        return f"Microphone: {self.config.mic_name or 'System Default'}"
+
+    def _build_mic_submenu(self):
+        for key in list(self.mic_menu.keys()):
+            del self.mic_menu[key]
+        self.mic_items = {}
+
+        item = rumps.MenuItem("System Default", callback=lambda _: self._set_mic(""))
+        self.mic_menu["__system__"] = item
+        self.mic_items[""] = item
+
+        for name in _get_input_devices():
+            i = rumps.MenuItem(name, callback=lambda _, n=name: self._set_mic(n))
+            self.mic_menu[name] = i
+            self.mic_items[name] = i
+
+        self.mic_menu["__refresh__"] = rumps.MenuItem(
+            "— Refresh Device List", callback=lambda _: self._build_mic_submenu()
+        )
+        self._sync_mic_checkmarks()
+
+    def _sync_mic_checkmarks(self):
+        current = self.config.mic_name
+        for name, item in self.mic_items.items():
+            label = "System Default" if name == "" else name
+            item.title = ("✓ " if name == current else "   ") + label
+        self.mic_menu.title = self._mic_label()
+
+    def _set_mic(self, name: str):
+        self.config.mic_name = name
+        self.config.save()
+        self.recorder.device = name or None
+        self._sync_mic_checkmarks()
+        logger.info("Microphone changed to: %s", name or "System Default")
 
     # ------------------------------------------------------------ recording
 

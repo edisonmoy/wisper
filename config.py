@@ -18,6 +18,7 @@ class Config:
     cleanup_mode: str = "regex"
     hotkey_vk: int = 63   # macOS virtual key code; 63 = built-in Fn/Globe key
     hotkey_key: str = ""  # pynput Key name (e.g. "alt_r"); if set, overrides hotkey_vk
+    mic_name: str = ""    # sounddevice device name; empty = system default
 
     def __post_init__(self):
         if self.model not in MODELS:
@@ -30,6 +31,8 @@ class Config:
             self.hotkey_vk = 63
         if not isinstance(self.hotkey_key, str):
             self.hotkey_key = ""
+        if not isinstance(self.mic_name, str):
+            self.mic_name = ""
 
     @classmethod
     def load(cls) -> "Config":

@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_mod
-from app import VERSION, WisperApp, _make_menubar_image, _HOTKEY_PRESETS
+from app import VERSION, WisperApp, _make_menubar_image, _HOTKEY_PRESETS, _get_input_devices
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -919,3 +919,119 @@ def test_set_hotkey_saves_and_reloads(wa):
 def test_hotkey_menu_title_updates(wa):
     wa._set_hotkey(63, "")
     assert "fn" in wa.hotkey_menu.title.lower()
+
+
+# ---------------------------------------------------------------------------
+# microphone submenu
+# ---------------------------------------------------------------------------
+
+
+def test_build_menu_creates_mic_menu(wa):
+    assert wa.mic_menu is not None
+
+
+def test_mic_menu_has_system_default_item(wa):
+    assert "" in wa.mic_items
+
+
+def test_mic_label_system_default(wa):
+    wa.config.mic_name = ""
+    assert wa._mic_label() == "Microphone: System Default"
+
+
+def test_mic_label_named_device(wa):
+    wa.config.mic_name = "AirPods Pro"
+    assert wa._mic_label() == "Microphone: AirPods Pro"
+
+
+def test_sync_mic_checkmarks_marks_system_default(wa):
+    wa.config.mic_name = ""
+    wa._sync_mic_checkmarks()
+    assert wa.mic_items[""].title.startswith("✓")
+
+
+def test_sync_mic_checkmarks_clears_others(wa):
+    with patch("app._get_input_devices", return_value=["Built-in Mic", "AirPods"]):
+        wa._build_mic_submenu()
+    wa.config.mic_name = ""
+    wa._sync_mic_checkmarks()
+    assert not wa.mic_items["Built-in Mic"].title.startswith("✓")
+    assert not wa.mic_items["AirPods"].title.startswith("✓")
+
+
+def test_sync_mic_checkmarks_marks_named_device(wa):
+    with patch("app._get_input_devices", return_value=["Built-in Mic"]):
+        wa._build_mic_submenu()
+    wa.config.mic_name = "Built-in Mic"
+    wa._sync_mic_checkmarks()
+    assert wa.mic_items["Built-in Mic"].title.startswith("✓")
+    assert not wa.mic_items[""].title.startswith("✓")
+
+
+def test_set_mic_updates_config(wa):
+    wa._set_mic("AirPods Pro")
+    assert wa.config.mic_name == "AirPods Pro"
+
+
+def test_set_mic_updates_recorder_device(wa):
+    wa._set_mic("AirPods Pro")
+    assert wa.recorder.device == "AirPods Pro"
+
+
+def test_set_mic_system_default_sets_device_none(wa):
+    wa.recorder.device = "AirPods Pro"
+    wa._set_mic("")
+    assert wa.recorder.device is None
+
+
+def test_set_mic_saves_config(wa):
+    with patch.object(wa.config, "save") as mock_save:
+        wa._set_mic("Built-in Mic")
+    mock_save.assert_called_once()
+
+
+def test_build_mic_submenu_populates_input_devices(wa):
+    with patch("app._get_input_devices", return_value=["Mic A", "Mic B"]):
+        wa._build_mic_submenu()
+    assert "Mic A" in wa.mic_items
+    assert "Mic B" in wa.mic_items
+
+
+def test_build_mic_submenu_always_has_system_default(wa):
+    with patch("app._get_input_devices", return_value=[]):
+        wa._build_mic_submenu()
+    assert "" in wa.mic_items
+
+
+def test_build_mic_submenu_clears_stale_items(wa):
+    with patch("app._get_input_devices", return_value=["Old Mic"]):
+        wa._build_mic_submenu()
+    with patch("app._get_input_devices", return_value=["New Mic"]):
+        wa._build_mic_submenu()
+    assert "Old Mic" not in wa.mic_items
+    assert "New Mic" in wa.mic_items
+
+
+def test_recorder_device_applied_on_init(tmp_app_dir):
+    """Stored mic_name is applied to recorder.device at startup."""
+    import config as config_module
+
+    cfg = config_module.Config(mic_name="AirPods Pro")
+    with patch.object(app_mod, "create_recording_overlay", return_value=MagicMock()):
+        with patch.object(app_mod.Transcriber, "preload"):
+            with patch("app.threading.Timer", return_value=MagicMock()):
+                with patch.object(app_mod.rumps, "quit_application"):
+                    with patch.object(app_mod.rumps, "notification"):
+                        with patch("app.AppKit"):
+                            with patch.object(app_mod.Config, "load", return_value=cfg):
+                                instance = WisperApp()
+    assert instance.recorder.device == "AirPods Pro"
+
+
+def test_get_input_devices_returns_list_on_sounddevice_error():
+    """If sounddevice is unavailable, _get_input_devices returns []."""
+    import sys
+
+    with patch.dict(sys.modules, {"sounddevice": None}):
+        result = _get_input_devices()
+    assert result == []
