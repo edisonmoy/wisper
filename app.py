@@ -357,6 +357,8 @@ class WisperApp(rumps.App):
     # --------------------------------------------------------------- hotkey
 
     def _setup_hotkey(self):
+        if hasattr(self, "hotkey"):
+            self.hotkey.stop()
         self.hotkey = HotkeyManager(
             on_start=self._on_fn_down,
             on_stop=self._on_fn_up,
