@@ -127,6 +127,29 @@ def test_start_passes_none_device_when_unset(recorder):
     assert kwargs["device"] is None
 
 
+def test_start_falls_back_to_system_default_on_device_error(recorder):
+    recorder.device = "AirPods Pro"
+    mock_sd = MagicMock()
+    good_stream = MagicMock()
+    # First call (named device) raises; second call (None) succeeds.
+    mock_sd.InputStream.side_effect = [OSError("paInvalidDevice"), good_stream]
+    with _mock_sd(mock_sd):
+        recorder.start()
+    assert mock_sd.InputStream.call_count == 2
+    second_call_kwargs = mock_sd.InputStream.call_args_list[1][1]
+    assert second_call_kwargs["device"] is None
+
+
+def test_start_does_not_fallback_when_system_default_fails(recorder):
+    recorder.device = None
+    mock_sd = MagicMock()
+    mock_sd.InputStream.side_effect = OSError("no audio hardware")
+    with _mock_sd(mock_sd):
+        with pytest.raises(OSError):
+            recorder.start()
+    assert mock_sd.InputStream.call_count == 1
+
+
 def test_start_while_already_recording_is_noop(recorder):
     """start() while already recording must not reset the buffer or re-open a stream."""
     recorder._recording = True

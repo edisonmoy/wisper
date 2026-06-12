@@ -1,7 +1,10 @@
 import collections
+import logging
 import threading
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16_000  # Hz — what Whisper expects
 CHANNELS = 1
@@ -37,7 +40,7 @@ class AudioRecorder:
             self._buffer = []
             self._waveform = collections.deque([0.0] * WAVEFORM_BARS, maxlen=WAVEFORM_BARS)
             self._recording = True
-            self._stream = sd.InputStream(
+            stream_kwargs = dict(
                 samplerate=SAMPLE_RATE,
                 channels=CHANNELS,
                 dtype=DTYPE,
@@ -45,6 +48,14 @@ class AudioRecorder:
                 blocksize=1024,
                 device=self.device,
             )
+            try:
+                self._stream = sd.InputStream(**stream_kwargs)
+            except Exception:
+                if self.device is None:
+                    raise
+                logger.warning("Device %r unavailable; falling back to system default", self.device)
+                stream_kwargs["device"] = None
+                self._stream = sd.InputStream(**stream_kwargs)
             self._stream.start()
 
     def stop(self) -> np.ndarray | None:
