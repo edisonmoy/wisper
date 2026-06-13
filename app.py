@@ -555,6 +555,7 @@ class WisperApp(rumps.App):
             threading.Timer(4.0, self._reset_update_state).start()
         else:
             # Updates found — install and restart without requiring a second click.
+            logger.info("Update check: %d update(s) available, installing", n)
             self._update_state = "installing"
             self._run_install()
 
@@ -565,6 +566,7 @@ class WisperApp(rumps.App):
     def _run_install(self):
         ok = install_update(REPO_DIR)
         if not ok:
+            logger.error("Update install failed; leaving running instance untouched")
             self._update_state = "error"
             return
 
@@ -577,6 +579,10 @@ class WisperApp(rumps.App):
             capture_output=True,
         )
         if r.returncode != 0:
+            logger.warning(
+                "launchctl kickstart failed (%s); falling back to direct relaunch",
+                r.stderr.decode(errors="replace").strip(),
+            )
             # Not managed by launchd (e.g. started from terminal) — spawn directly.
             launcher = REPO_DIR / "Wisper.app" / "Contents" / "MacOS" / "Wisper"
             if launcher.exists():
@@ -586,6 +592,10 @@ class WisperApp(rumps.App):
                     stderr=subprocess.DEVNULL,
                     start_new_session=True,  # detach so it survives this process exiting
                 )
+            else:
+                logger.error("Update install: no launcher found at %s; cannot relaunch", launcher)
+        else:
+            logger.info("Update install: relaunched via launchctl kickstart")
 
         # Signal _ui_tick to call rumps.quit_application() on the main thread.
         # Calling it directly here (background thread) causes an unclean exit

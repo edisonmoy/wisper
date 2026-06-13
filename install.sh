@@ -81,7 +81,10 @@ cat > "$PLIST" <<EOF
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>StandardErrorPath</key>
   <string>${LOG_PATH_ESC}</string>
   <key>StandardOutPath</key>
