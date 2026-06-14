@@ -1,8 +1,11 @@
+import logging
 import threading
 import time
 from typing import Callable
 
 from pynput import keyboard
+
+logger = logging.getLogger("wisper")
 
 # macOS virtual key code for fn / Globe key (kVK_Function = 63).
 # pynput fires on_release for NSFlagsChanged events (both press and release),
@@ -104,6 +107,7 @@ class HotkeyManager:
             try:
                 self.on_start()
             except Exception:
+                logger.error("Hotkey on_start callback failed", exc_info=True)
                 self._recording = False
             finally:
                 self._busy = False
@@ -124,7 +128,7 @@ class HotkeyManager:
                 try:
                     self.on_stop()
                 except Exception:
-                    pass
+                    logger.error("Hotkey on_stop callback failed", exc_info=True)
 
             threading.Thread(target=_run, daemon=True).start()
             return
@@ -145,6 +149,7 @@ class HotkeyManager:
                 try:
                     self.on_start()
                 except Exception:
+                    logger.error("Hotkey on_start callback failed", exc_info=True)
                     self._recording = False  # roll back so state stays consistent
                 finally:
                     self._busy = False
@@ -157,7 +162,7 @@ class HotkeyManager:
                 try:
                     self.on_stop()
                 except Exception:
-                    pass
+                    logger.error("Hotkey on_stop callback failed", exc_info=True)
                 finally:
                     self._busy = False
 

@@ -1,6 +1,9 @@
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+logger = logging.getLogger("wisper")
 
 REPO_DIR = Path(__file__).parent.resolve()
 APP_DIR = Path.home() / ".wisper"
@@ -42,8 +45,8 @@ class Config:
                     data = json.load(f)
                 known = {k: v for k, v in data.items() if k in cls.__dataclass_fields__}
                 return cls(**known)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error("Failed to load %s, falling back to defaults: %s", CONFIG_FILE, exc)
         return cls()
 
     def save(self):

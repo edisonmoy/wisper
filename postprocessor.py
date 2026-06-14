@@ -1,7 +1,10 @@
+import logging
 import platform
 import re
 import subprocess
 import threading
+
+logger = logging.getLogger("wisper")
 
 _ORDINALS = [
     "first",
@@ -138,8 +141,8 @@ class PostProcessor:
                 model, tokenizer = load("mlx-community/Qwen2.5-0.5B-Instruct-4bit")
                 self._mlx_model = model
                 self._mlx_tokenizer = tokenizer
-            except Exception:
-                pass  # MLX unavailable or download failed; regex-only fallback
+            except Exception as exc:
+                logger.error("AI cleanup unavailable, falling back to regex: %s", exc)
 
     def _apply_mlx(self, text: str) -> str:
         with self._mlx_lock:
@@ -168,7 +171,9 @@ class PostProcessor:
                 cleaned = result.strip()
                 # Safety: if the model returns something wildly different in length, discard
                 if len(cleaned) > len(text) * 2 or len(cleaned) < 2:
+                    logger.warning("AI cleanup output discarded (suspicious length), using pre-AI text")
                     return text
                 return cleaned
-            except Exception:
+            except Exception as exc:
+                logger.error("AI cleanup failed, using pre-AI text: %s", exc)
                 return text

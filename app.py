@@ -40,7 +40,8 @@ def _get_input_devices() -> list[str]:
     try:
         import sounddevice as sd
         return [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
-    except Exception:
+    except Exception as exc:
+        logger.error("Could not query input devices: %s", exc)
         return []
 
 
