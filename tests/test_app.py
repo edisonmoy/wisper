@@ -1035,3 +1035,18 @@ def test_get_input_devices_returns_list_on_sounddevice_error():
     with patch.dict(sys.modules, {"sounddevice": None}):
         result = _get_input_devices()
     assert result == []
+
+
+def test_get_input_devices_returns_input_device_names():
+    """When sounddevice is available, return names of devices with input channels."""
+    fake_sd = MagicMock()
+    fake_sd.query_devices.return_value = [
+        {"name": "Built-in Mic", "max_input_channels": 1},
+        {"name": "Speakers", "max_input_channels": 0},
+        {"name": "AirPods", "max_input_channels": 2},
+    ]
+    import sys
+
+    with patch.dict(sys.modules, {"sounddevice": fake_sd}):
+        result = _get_input_devices()
+    assert result == ["Built-in Mic", "AirPods"]

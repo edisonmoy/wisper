@@ -75,6 +75,21 @@ def test_post_init_corrects_invalid_mic_name():
     assert cfg.mic_name == ""
 
 
+def test_post_init_corrects_invalid_hotkey_vk():
+    cfg = Config(hotkey_vk="not_an_int")
+    assert cfg.hotkey_vk == 63
+
+
+def test_post_init_corrects_negative_hotkey_vk():
+    cfg = Config(hotkey_vk=-1)
+    assert cfg.hotkey_vk == 63
+
+
+def test_post_init_corrects_invalid_hotkey_key():
+    cfg = Config(hotkey_key=42)
+    assert cfg.hotkey_key == ""
+
+
 def test_mic_name_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "APP_DIR", tmp_path)
     monkeypatch.setattr(config_module, "CONFIG_FILE", tmp_path / "config.json")

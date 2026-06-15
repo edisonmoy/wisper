@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pynput import keyboard
 
-from hotkey import _FN_VK, HotkeyManager, _is_fn, key_display_name
+from hotkey import _FN_VK, HotkeyManager, _is_fn, _is_named_key, key_display_name
 
 # ------------------------------------------------------------------ _is_fn
 
@@ -236,6 +236,22 @@ def test_ptt_non_matching_key_ignored(ptt):
     ptt._on_press(keyboard.Key.space)
     time.sleep(0.05)
     ptt.on_start.assert_not_called()
+
+
+def test_ptt_on_stop_exception_is_swallowed(ptt):
+    """on_stop raising in push-to-talk release must not propagate."""
+    ptt.on_stop.side_effect = RuntimeError("stop failed")
+    ptt._on_press(ALT_R)
+    time.sleep(0.05)
+    ptt._on_release(ALT_R)
+    time.sleep(0.05)
+    assert ptt._recording is False
+
+
+def test_is_named_key_unknown_name_returns_false():
+    """_is_named_key returns False when the Key attribute doesn't exist."""
+    key = keyboard.Key.space
+    assert _is_named_key(key, "nonexistent_key_xyz") is False
 
 
 def test_ptt_toggle_mode_false_for_named_key(ptt):
