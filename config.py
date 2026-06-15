@@ -16,9 +16,9 @@ class Config:
     auto_paste: bool = True
     history_limit: int = 20
     cleanup_mode: str = "regex"
-    hotkey_vk: int = 63   # macOS virtual key code; 63 = built-in Fn/Globe key
+    hotkey_vk: int = 63  # macOS virtual key code; 63 = built-in Fn/Globe key
     hotkey_key: str = ""  # pynput Key name (e.g. "alt_r"); if set, overrides hotkey_vk
-    mic_name: str = ""    # sounddevice device name; empty = system default
+    mic_name: str = ""  # sounddevice device name; empty = system default
 
     def __post_init__(self):
         if self.model not in MODELS:

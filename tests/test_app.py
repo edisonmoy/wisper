@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_mod
-from app import VERSION, WisperApp, _make_menubar_image, _HOTKEY_PRESETS, _get_input_devices
+from app import _HOTKEY_PRESETS, VERSION, WisperApp, _get_input_devices, _make_menubar_image
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -31,6 +31,7 @@ def _install_pynput_mock():
         space = _SpecialKey("space")
         enter = _SpecialKey("enter")
         esc = _SpecialKey("esc")
+        alt_r = _SpecialKey("alt_r")
 
     keyboard_mock = MagicMock()
     keyboard_mock.KeyCode = KeyCode

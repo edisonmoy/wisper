@@ -33,12 +33,14 @@ logger = logging.getLogger("wisper")
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
 VERSION = "1.0.0"
 
+
 # Preset hotkey options shown in the Hotkey submenu.
 # Each entry: (display_name, hotkey_vk, hotkey_key)
 def _get_input_devices() -> list[str]:
     """Return names of available input devices; returns [] if sounddevice is unavailable."""
     try:
         import sounddevice as sd
+
         return [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
     except Exception:
         return []
