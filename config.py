@@ -13,7 +13,6 @@ CLEANUP_MODES = ["none", "regex", "ai"]
 @dataclass
 class Config:
     model: str = "base.en"
-    auto_paste: bool = True
     history_limit: int = 20
     cleanup_mode: str = "regex"
     hotkey_vk: int = 63  # macOS virtual key code; 63 = built-in Fn/Globe key

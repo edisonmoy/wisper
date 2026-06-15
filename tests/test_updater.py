@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from updater import _remote_is_trusted, check_for_updates, install_update
+from updater import _parse_git_host, _remote_is_trusted, check_for_updates, install_update
 
 
 def _proc(returncode=0, stdout="0\n"):
@@ -59,6 +59,30 @@ def test_passes_cwd_to_git(tmp_path):
     assert all(c == tmp_path for c in calls)
 
 
+# ---------------------------------------------------------------- _parse_git_host
+
+
+def test_parse_git_host_https():
+    assert _parse_git_host("https://github.com/user/repo.git") == "github.com"
+
+
+def test_parse_git_host_https_with_port():
+    assert _parse_git_host("https://github.com:443/user/repo.git") == "github.com"
+
+
+def test_parse_git_host_ssh():
+    assert _parse_git_host("git@github.com:user/repo.git") == "github.com"
+
+
+def test_parse_git_host_spoofed_subdomain():
+    """github.com.attacker.com must NOT parse as github.com."""
+    assert _parse_git_host("https://github.com.attacker.com/repo") == "github.com.attacker.com"
+
+
+def test_parse_git_host_unknown_format():
+    assert _parse_git_host("not-a-url") == ""
+
+
 # ---------------------------------------------------------------- _remote_is_trusted
 
 
@@ -75,6 +99,15 @@ def test_remote_trusted_for_github_ssh(tmp_path):
 def test_remote_untrusted_for_non_github(tmp_path):
     with patch(
         "updater.subprocess.run", return_value=_proc(0, "https://evil.example.com/repo.git\n")
+    ):
+        assert _remote_is_trusted(tmp_path) is False
+
+
+def test_remote_untrusted_for_spoofed_github_subdomain(tmp_path):
+    """github.com.attacker.com must not be treated as trusted."""
+    with patch(
+        "updater.subprocess.run",
+        return_value=_proc(0, "https://github.com.attacker.com/repo.git\n"),
     ):
         assert _remote_is_trusted(tmp_path) is False
 

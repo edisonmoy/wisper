@@ -3,6 +3,8 @@ import re
 import subprocess
 import threading
 
+from config import Config
+
 _ORDINALS = [
     "first",
     "second",
@@ -85,7 +87,7 @@ def _is_apple_silicon() -> bool:
 
 
 class PostProcessor:
-    def __init__(self, config):
+    def __init__(self, config: Config):
         self._mode = config.cleanup_mode
         self._mlx_model = None
         self._mlx_tokenizer = None

@@ -1,5 +1,14 @@
 import sqlite3
 from pathlib import Path
+from typing import TypedDict
+
+
+class HistoryEntry(TypedDict):
+    id: int
+    text: str
+    model: str
+    latency_ms: int
+    created_at: str
 
 
 class HistoryDB:
@@ -25,7 +34,9 @@ class HistoryDB:
                 conn.execute("ALTER TABLE history ADD COLUMN latency_ms INTEGER DEFAULT 0")
 
     def _conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def add(self, text: str, audio_ms: int = 0, model: str = "", latency_ms: int = 0):
         with self._conn() as conn:
@@ -34,7 +45,7 @@ class HistoryDB:
                 (text.strip(), audio_ms, model, latency_ms),
             )
 
-    def get_recent(self, n: int = 20) -> list[dict]:
+    def get_recent(self, n: int = 20) -> list[HistoryEntry]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT id, text, model, latency_ms, created_at"
@@ -42,8 +53,14 @@ class HistoryDB:
                 (n,),
             ).fetchall()
         return [
-            {"id": r[0], "text": r[1], "model": r[2], "latency_ms": r[3], "created_at": r[4]}
-            for r in rows
+            HistoryEntry(
+                id=row["id"],
+                text=row["text"],
+                model=row["model"],
+                latency_ms=row["latency_ms"],
+                created_at=row["created_at"],
+            )
+            for row in rows
         ]
 
     def clear(self):

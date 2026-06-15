@@ -1,3 +1,4 @@
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -252,6 +253,82 @@ def test_is_named_key_unknown_name_returns_false():
     """_is_named_key returns False when the Key attribute doesn't exist."""
     key = keyboard.Key.space
     assert _is_named_key(key, "nonexistent_key_xyz") is False
+
+
+# ------------------------------------------------------------------ is_recording property
+
+
+def test_is_recording_initially_false():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    assert mgr.is_recording is False
+
+
+def test_is_recording_reflects_internal_state():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    mgr._recording = True
+    assert mgr.is_recording is True
+    mgr._recording = False
+    assert mgr.is_recording is False
+
+
+# ------------------------------------------------------------------ _dispatch helper
+
+
+def test_dispatch_runs_fn():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    done = threading.Event()
+    mgr._dispatch(lambda: done.set())
+    assert done.wait(timeout=1)
+
+
+def test_dispatch_clears_busy_by_default():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    mgr._busy = True
+    done = threading.Event()
+    mgr._dispatch(lambda: done.set())
+    done.wait(timeout=1)
+    time.sleep(0.05)
+    assert mgr._busy is False
+
+
+def test_dispatch_does_not_clear_busy_when_disabled():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    mgr._busy = True
+    done = threading.Event()
+    mgr._dispatch(lambda: done.set(), clear_busy=False)
+    done.wait(timeout=1)
+    time.sleep(0.05)
+    assert mgr._busy is True
+
+
+def test_dispatch_rolls_back_recording_on_error():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    mgr._recording = True
+    done = threading.Event()
+
+    def _raise():
+        done.set()
+        raise RuntimeError("boom")
+
+    mgr._dispatch(_raise, rollback_recording=True)
+    done.wait(timeout=1)
+    time.sleep(0.05)
+    assert mgr._recording is False
+
+
+def test_dispatch_does_not_rollback_recording_when_disabled():
+    mgr = HotkeyManager(on_start=MagicMock(), on_stop=MagicMock())
+    mgr._recording = True
+    done = threading.Event()
+
+    def _raise():
+        done.set()
+        raise RuntimeError("boom")
+
+    mgr._dispatch(_raise, rollback_recording=False)
+    done.wait(timeout=1)
+    time.sleep(0.05)
+    assert mgr._recording is True
 
 
 def test_ptt_toggle_mode_false_for_named_key(ptt):

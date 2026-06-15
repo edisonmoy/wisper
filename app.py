@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 import time
+from typing import Literal, NamedTuple
 
 import AppKit
 import rumps
@@ -33,9 +34,48 @@ logger = logging.getLogger("wisper")
 MIN_AUDIO_MS = 300  # ignore taps shorter than this
 VERSION = "1.0.0"
 
+# Type alias for the update state machine value.
+UpdateStateValue = None | int | Literal["checking", "installing", "restarting", "error"]
 
-# Preset hotkey options shown in the Hotkey submenu.
-# Each entry: (display_name, hotkey_vk, hotkey_key)
+# Human-readable labels for cleanup modes — shared by _build_menu and _sync_cleanup_checkmarks.
+_CLEANUP_LABELS: dict[str, str] = {
+    "none": "None",
+    "regex": "Basic (remove um/uh)",
+    "ai": "AI — Polish & rewrite (Apple Silicon)",
+}
+
+
+class HotkeyPreset(NamedTuple):
+    label: str
+    vk: int
+    key_name: str
+
+
+_HOTKEY_PRESETS: list[HotkeyPreset] = [
+    HotkeyPreset("fn  (built-in Globe key)", 63, ""),
+    HotkeyPreset("Right ⌥  Option", 0, "alt_r"),
+    HotkeyPreset("Left ⌥  Option", 0, "alt_l"),
+    HotkeyPreset("Right ⌃  Control", 0, "ctrl_r"),
+    HotkeyPreset("Left ⌃  Control", 0, "ctrl_l"),
+    HotkeyPreset("Caps Lock", 0, "caps_lock"),
+    HotkeyPreset("F13", 0, "f13"),
+    HotkeyPreset("F14", 0, "f14"),
+    HotkeyPreset("F15", 0, "f15"),
+    HotkeyPreset("F16", 0, "f16"),
+]
+
+
+def _checked_title(label: str, checked: bool) -> str:
+    """Prefix label with a checkmark (✓) or indent spaces for menu alignment."""
+    return ("✓ " if checked else "   ") + label
+
+
+def _clear_menu(menu: rumps.MenuItem) -> None:
+    """Remove all entries from a rumps MenuItem submenu."""
+    for key in list(menu.keys()):
+        del menu[key]
+
+
 def _get_input_devices() -> list[str]:
     """Return names of available input devices; returns [] if sounddevice is unavailable."""
     try:
@@ -44,20 +84,6 @@ def _get_input_devices() -> list[str]:
         return [d["name"] for d in sd.query_devices() if d["max_input_channels"] > 0]
     except Exception:
         return []
-
-
-_HOTKEY_PRESETS = [
-    ("fn  (built-in Globe key)", 63, ""),
-    ("Right ⌥  Option", 0, "alt_r"),
-    ("Left ⌥  Option", 0, "alt_l"),
-    ("Right ⌃  Control", 0, "ctrl_r"),
-    ("Left ⌃  Control", 0, "ctrl_l"),
-    ("Caps Lock", 0, "caps_lock"),
-    ("F13", 0, "f13"),
-    ("F14", 0, "f14"),
-    ("F15", 0, "f15"),
-    ("F16", 0, "f16"),
-]
 
 
 def _make_menubar_image():
@@ -88,6 +114,46 @@ def _make_menubar_image():
     return img
 
 
+class UpdateManager:
+    """Thread-safe update state machine and menu-item renderer.
+
+    Owns the lock and state value so WisperApp doesn't need to manage them
+    directly. WisperApp delegates _update_state reads/writes here and calls
+    menu_item_config() to render the update menu item each tick.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.__state: UpdateStateValue = None
+
+    @property
+    def state(self) -> UpdateStateValue:
+        with self._lock:
+            return self.__state
+
+    @state.setter
+    def state(self, value: UpdateStateValue) -> None:
+        with self._lock:
+            self.__state = value
+
+    def menu_item_config(self) -> tuple[str, bool]:
+        """Return (title, enabled) for the update menu item based on current state."""
+        s = self.state
+        if s is None:
+            return "Check for Updates", True
+        if s == "checking":
+            return "Checking for updates…", False
+        if s == 0:
+            return "Up to date ✓", True
+        if isinstance(s, int):
+            return "Update Available — Install", True
+        if s == "installing":
+            return "Installing update…", False
+        if s == "restarting":
+            return "Restarting…", False
+        return "Update check failed — retry", True  # "error"
+
+
 class WisperApp(rumps.App):
     def __init__(self):
         super().__init__("Wisper", quit_button=None)
@@ -111,17 +177,15 @@ class WisperApp(rumps.App):
 
         # Flags set by background threads; consumed by main-thread _ui_tick.
         self._needs_history_refresh = False
-        self._pending_restore: list | None = None  # clipboard snapshot to restore
+        self._pending_restore: list[dict[str, bytes]] | None = None
         self._pasting = False  # blocks _ui_tick restore during pbcopy→cmd+v window
 
         # Watchdog state
         self._recording_started_at: float | None = None
         self._mismatch_ticks = 0
 
-        # Update state: None | 'checking' | int (0=up-to-date, N=available) | 'installing' | 'error'
-        # Protected by _update_lock for safe cross-thread access.
-        self._update_lock = threading.Lock()
-        self.__update_state = None
+        # Update state machine — thread-safe state + menu rendering.
+        self.update_manager = UpdateManager()
 
         # _nsapp (rumps internals) is only created inside run(); defer NSStatusItem
         # customisation to the first _ui_tick so the run loop has already started.
@@ -141,15 +205,15 @@ class WisperApp(rumps.App):
         # Background update check 5s after launch (non-blocking).
         threading.Timer(5.0, self._run_update_check).start()
 
+    # ------------------------------------------------------------------ update state
+
     @property
-    def _update_state(self):
-        with self._update_lock:
-            return self.__update_state
+    def _update_state(self) -> UpdateStateValue:
+        return self.update_manager.state
 
     @_update_state.setter
-    def _update_state(self, value):
-        with self._update_lock:
-            self.__update_state = value
+    def _update_state(self, value: UpdateStateValue) -> None:
+        self.update_manager.state = value
 
     # ------------------------------------------------------------------ menu
 
@@ -175,23 +239,23 @@ class WisperApp(rumps.App):
 
         self.cleanup_items: dict[str, rumps.MenuItem] = {}
         cleanup_menu = rumps.MenuItem("Text Cleanup")
-        labels = {
-            "none": "None",
-            "regex": "Basic (remove um/uh)",
-            "ai": "AI — Polish & rewrite (Apple Silicon)",
-        }
         for mode in CLEANUP_MODES:
-            item = rumps.MenuItem(labels[mode], callback=lambda _, m=mode: self._set_cleanup(m))
+            item = rumps.MenuItem(
+                _CLEANUP_LABELS[mode], callback=lambda _, m=mode: self._set_cleanup(m)
+            )
             cleanup_menu[mode] = item
             self.cleanup_items[mode] = item
         self._sync_cleanup_checkmarks()
 
         hotkey_menu = rumps.MenuItem(f"Hotkey: {self._hotkey_label()}")
         self.hotkey_preset_items: dict[tuple, tuple] = {}
-        for name, vk, key_name in _HOTKEY_PRESETS:
-            item = rumps.MenuItem(name, callback=lambda _, v=vk, k=key_name: self._set_hotkey(v, k))
-            hotkey_menu[name] = item
-            self.hotkey_preset_items[(vk, key_name)] = (item, name)
+        for preset in _HOTKEY_PRESETS:
+            item = rumps.MenuItem(
+                preset.label,
+                callback=lambda _, p=preset: self._set_hotkey(p.vk, p.key_name),
+            )
+            hotkey_menu[preset.label] = item
+            self.hotkey_preset_items[(preset.vk, preset.key_name)] = (item, preset.label)
         self.hotkey_menu = hotkey_menu
         self._sync_hotkey_checkmarks()
 
@@ -216,16 +280,11 @@ class WisperApp(rumps.App):
 
     def _sync_model_checkmarks(self):
         for m, item in self.model_items.items():
-            item.title = ("✓ " if m == self.config.model else "   ") + m
+            item.title = _checked_title(m, m == self.config.model)
 
     def _sync_cleanup_checkmarks(self):
-        labels = {
-            "none": "None",
-            "regex": "Basic (remove um/uh)",
-            "ai": "AI — Polish & rewrite (Apple Silicon)",
-        }
         for mode, item in self.cleanup_items.items():
-            item.title = ("✓ " if mode == self.config.cleanup_mode else "   ") + labels[mode]
+            item.title = _checked_title(_CLEANUP_LABELS[mode], mode == self.config.cleanup_mode)
 
     def _set_cleanup(self, mode: str):
         self.config.cleanup_mode = mode
@@ -260,7 +319,7 @@ class WisperApp(rumps.App):
             self._pending_restore = None
         self._watchdog()
 
-    def _restore_clipboard(self, saved_items: list):
+    def _restore_clipboard(self, saved_items: list[dict[str, bytes]]):
         try:
             pb = AppKit.NSPasteboard.generalPasteboard()
             pb.clearContents()
@@ -275,7 +334,7 @@ class WisperApp(rumps.App):
                 pb.writeObjects_(ns_items)
         except Exception as exc:
             logger.error("Clipboard restore failed: %s", exc)
-            rumps.notification("Wisper", "Clipboard restore failed", str(exc), sound=False)
+            self._notify("Clipboard restore failed", str(exc))
 
     # ------------------------------------------------------------- watchdog
 
@@ -284,7 +343,7 @@ class WisperApp(rumps.App):
 
     def _watchdog(self):
         recorder_on = self.recorder.is_recording
-        hotkey_on = self.hotkey._recording
+        hotkey_on = self.hotkey.is_recording
 
         # Detect divergence between the two state machines.
         if recorder_on != hotkey_on:
@@ -309,28 +368,13 @@ class WisperApp(rumps.App):
         self.overlay.performSelectorOnMainThread_withObject_waitUntilDone_("hide:", None, False)
 
     def _sync_update_item(self):
-        s = self._update_state
-        if s is None:
-            title, enabled = "Check for Updates", True
-        elif s == "checking":
-            title, enabled = "Checking for updates…", False
-        elif s == 0:
-            title, enabled = "Up to date ✓", True
-        elif isinstance(s, int):
-            title, enabled = "Update Available — Install", True
-        elif s == "installing":
-            title, enabled = "Installing update…", False
-        elif s == "restarting":
-            title, enabled = "Restarting…", False
-        else:  # 'error'
-            title, enabled = "Update check failed — retry", True
+        title, enabled = self.update_manager.menu_item_config()
         self.update_item.title = title
         self.update_item._menuitem.setEnabled_(enabled)
 
     def _refresh_history(self):
         """Must be called on the main thread (AppKit constraint)."""
-        for key in list(self.history_menu.keys()):
-            del self.history_menu[key]
+        _clear_menu(self.history_menu)
 
         items = self.db.get_recent(self.config.history_limit)
         if not items:
@@ -362,11 +406,9 @@ class WisperApp(rumps.App):
             if not ApplicationServices.AXIsProcessTrusted():
                 self.status_item.title = "⚠ Grant Accessibility — System Settings"
                 logger.warning("Accessibility permission not granted")
-                rumps.notification(
-                    "Wisper",
+                self._notify(
                     "Accessibility permission required",
                     "System Settings → Privacy & Security → Accessibility",
-                    sound=False,
                 )
         except Exception:
             pass  # not on macOS or permission API unavailable
@@ -387,7 +429,7 @@ class WisperApp(rumps.App):
     def _sync_hotkey_checkmarks(self):
         for (vk, key_name), (item, name) in self.hotkey_preset_items.items():
             current = self.config.hotkey_vk == vk and self.config.hotkey_key == key_name
-            item.title = ("✓ " if current else "   ") + name
+            item.title = _checked_title(name, current)
         self.hotkey_menu.title = f"Hotkey: {self._hotkey_label()}"
 
     def _set_hotkey(self, vk: int, key_name: str):
@@ -402,8 +444,7 @@ class WisperApp(rumps.App):
         return f"Microphone: {self.config.mic_name or 'System Default'}"
 
     def _build_mic_submenu(self):
-        for key in list(self.mic_menu.keys()):
-            del self.mic_menu[key]
+        _clear_menu(self.mic_menu)
         self.mic_items = {}
 
         item = rumps.MenuItem("System Default", callback=lambda _: self._set_mic(""))
@@ -424,7 +465,7 @@ class WisperApp(rumps.App):
         current = self.config.mic_name
         for name, item in self.mic_items.items():
             label = "System Default" if name == "" else name
-            item.title = ("✓ " if name == current else "   ") + label
+            item.title = _checked_title(label, name == current)
         self.mic_menu.title = self._mic_label()
 
     def _set_mic(self, name: str):
@@ -441,7 +482,7 @@ class WisperApp(rumps.App):
             self.recorder.start()
         except Exception as exc:
             logger.error("Could not start recording: %s", exc)
-            rumps.notification("Wisper", "Could not start recording", str(exc), sound=False)
+            self._notify("Could not start recording", str(exc))
             raise  # re-raise so HotkeyManager rolls back _recording = False
         self._recording_started_at = time.monotonic()
         logger.info("Recording started")
@@ -468,7 +509,7 @@ class WisperApp(rumps.App):
             logger.info("Transcribed %d ms audio in %d ms", audio_ms, latency_ms)
         except Exception as exc:
             logger.error("Transcription failed: %s", exc)
-            rumps.notification("Wisper", "Transcription failed", str(exc), sound=False)
+            self._notify("Transcription failed", str(exc))
             self.status_item.title = self._idle_title()
             return
 
@@ -484,14 +525,17 @@ class WisperApp(rumps.App):
 
     # -------------------------------------------------------------- output
 
+    def _notify(self, title: str, body: str) -> None:
+        rumps.notification("Wisper", title, body, sound=False)
+
     def _paste(self, text: str):
         # Snapshot the full clipboard (all types, including images) as raw bytes.
         # Reading NSPasteboard is safe from any thread; writing requires main thread,
         # so the restore is deferred to _ui_tick via _pending_restore.
         pb = AppKit.NSPasteboard.generalPasteboard()
-        saved_items = []
+        saved_items: list[dict[str, bytes]] = []
         for item in pb.pasteboardItems() or []:
-            saved_data = {}
+            saved_data: dict[str, bytes] = {}
             for ptype in item.types():
                 data = item.dataForType_(ptype)
                 if data:
@@ -504,13 +548,21 @@ class WisperApp(rumps.App):
         self._pasting = True
         self._pending_restore = None  # discard any unprocessed previous restore
         subprocess.run(["pbcopy"], input=text.encode(), check=True)
-        subprocess.run(
+        result = subprocess.run(
             [
                 "osascript",
                 "-e",
                 'tell application "System Events" to keystroke "v" using command down',
-            ]
+            ],
+            capture_output=True,
         )
+        if result.returncode != 0:
+            logger.error(
+                "Paste via osascript failed (rc=%d): %s",
+                result.returncode,
+                result.stderr.decode(errors="replace"),
+            )
+            self._notify("Paste failed", "Could not paste text — check Accessibility permission")
         # Set restore payload before clearing the flag so _ui_tick always sees
         # both fields in a consistent state (Python GIL makes each assignment atomic).
         self._pending_restore = saved_items

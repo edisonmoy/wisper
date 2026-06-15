@@ -1,4 +1,5 @@
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -19,6 +20,26 @@ def _git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _parse_git_host(url: str) -> str:
+    """Extract the hostname from an HTTPS or SSH git remote URL.
+
+    Handles the two common git remote formats:
+      https://github.com/user/repo.git
+      git@github.com:user/repo.git
+
+    Returns the lowercased hostname, or "" if the format is unrecognised.
+    Callers must validate the returned value against an allowlist — a substring
+    check on the raw URL is not sufficient (github.com.attacker.com passes it).
+    """
+    m = re.match(r"^https?://([^/:]+)", url)
+    if m:
+        return m.group(1).lower()
+    m = re.match(r"^[^@]+@([^:]+):", url)
+    if m:
+        return m.group(1).lower()
+    return ""
+
+
 def _remote_is_trusted(repo_dir: Path) -> bool:
     """Return True only if origin resolves to a github.com URL."""
     r = _git(["remote", "get-url", "origin"], repo_dir)
@@ -26,7 +47,8 @@ def _remote_is_trusted(repo_dir: Path) -> bool:
         logger.error("Update check: 'git remote get-url origin' failed: %s", r.stderr.strip())
         return False
     url = r.stdout.strip()
-    if _TRUSTED_REMOTE_HOST not in url:
+    host = _parse_git_host(url)
+    if host != _TRUSTED_REMOTE_HOST and not host.endswith("." + _TRUSTED_REMOTE_HOST):
         logger.error("Update check: origin remote %r is not a trusted GitHub URL", url)
         return False
     return True

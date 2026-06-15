@@ -14,7 +14,18 @@ import numpy as np
 import pytest
 
 import app as app_mod
-from app import _HOTKEY_PRESETS, VERSION, WisperApp, _get_input_devices, _make_menubar_image
+from app import (
+    _CLEANUP_LABELS,
+    _HOTKEY_PRESETS,
+    VERSION,
+    HotkeyPreset,
+    UpdateManager,
+    WisperApp,
+    _checked_title,
+    _clear_menu,
+    _get_input_devices,
+    _make_menubar_image,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -69,6 +80,32 @@ def test_make_menubar_image_returns_something():
 def test_version_constant_is_string():
     assert isinstance(VERSION, str)
     assert len(VERSION) > 0
+
+
+def test_checked_title_checked():
+    assert _checked_title("fn", True) == "✓ fn"
+
+
+def test_checked_title_unchecked():
+    assert _checked_title("fn", False) == "   fn"
+
+
+def test_clear_menu_removes_all_keys(wa):
+    wa.history_menu["_test"] = app_mod.rumps.MenuItem("Test")
+    _clear_menu(wa.history_menu)
+    assert list(wa.history_menu.keys()) == []
+
+
+def test_cleanup_labels_covers_all_modes():
+    from config import CLEANUP_MODES
+
+    assert set(_CLEANUP_LABELS.keys()) == set(CLEANUP_MODES)
+
+
+def test_hotkey_preset_is_named_tuple():
+    p = _HOTKEY_PRESETS[0]
+    assert isinstance(p, HotkeyPreset)
+    assert hasattr(p, "label") and hasattr(p, "vk") and hasattr(p, "key_name")
 
 
 # ---------------------------------------------------------------------------
@@ -1035,6 +1072,103 @@ def test_get_input_devices_returns_list_on_sounddevice_error():
     with patch.dict(sys.modules, {"sounddevice": None}):
         result = _get_input_devices()
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _notify
+# ---------------------------------------------------------------------------
+
+
+def test_notify_calls_rumps_notification(wa):
+    wa._notify("title", "body")
+    wa._mock_notification.assert_called_once_with("Wisper", "title", "body", sound=False)
+
+
+# ---------------------------------------------------------------------------
+# _paste — osascript failure path
+# ---------------------------------------------------------------------------
+
+
+def test_paste_logs_and_notifies_on_osascript_failure(wa):
+    wa._mock_appkit.NSPasteboard.generalPasteboard.return_value.pasteboardItems.return_value = []
+    ok = MagicMock(returncode=0)
+    fail = MagicMock(returncode=1, stderr=b"not trusted")
+    with patch("app.subprocess.run", side_effect=[ok, fail]):
+        wa._paste("hello")
+    wa._mock_notification.assert_called()
+
+
+def test_paste_does_not_notify_on_osascript_success(wa):
+    wa._mock_appkit.NSPasteboard.generalPasteboard.return_value.pasteboardItems.return_value = []
+    ok = MagicMock(returncode=0)
+    with patch("app.subprocess.run", side_effect=[ok, ok]):
+        wa._paste("hello")
+    wa._mock_notification.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# UpdateManager
+# ---------------------------------------------------------------------------
+
+
+def test_update_manager_initial_state_is_none():
+    mgr = UpdateManager()
+    assert mgr.state is None
+
+
+def test_update_manager_state_roundtrip():
+    mgr = UpdateManager()
+    mgr.state = "checking"
+    assert mgr.state == "checking"
+
+
+def test_update_manager_state_thread_safe():
+    mgr = UpdateManager()
+    results = []
+
+    def _set():
+        mgr.state = "installing"
+        results.append(mgr.state)
+
+    t = threading.Thread(target=_set)
+    t.start()
+    t.join(timeout=2)
+    assert results == ["installing"]
+
+
+@pytest.mark.parametrize(
+    "state,expected_title,expected_enabled",
+    [
+        (None, "Check for Updates", True),
+        ("checking", "Checking for updates…", False),
+        (0, "Up to date ✓", True),
+        (3, "Update Available — Install", True),
+        ("installing", "Installing update…", False),
+        ("restarting", "Restarting…", False),
+        ("error", "Update check failed — retry", True),
+    ],
+)
+def test_update_manager_menu_item_config(state, expected_title, expected_enabled):
+    mgr = UpdateManager()
+    mgr.state = state
+    title, enabled = mgr.menu_item_config()
+    assert title == expected_title
+    assert enabled == expected_enabled
+
+
+def test_update_state_property_delegates_to_manager(wa):
+    wa.update_manager.state = "checking"
+    assert wa._update_state == "checking"
+
+
+def test_update_state_setter_delegates_to_manager(wa):
+    wa._update_state = "error"
+    assert wa.update_manager.state == "error"
+
+
+# ---------------------------------------------------------------------------
+# _get_input_devices (continued)
+# ---------------------------------------------------------------------------
 
 
 def test_get_input_devices_returns_input_device_names():

@@ -75,6 +75,20 @@ def test_result_has_all_fields(db):
     assert {"id", "text", "model", "latency_ms", "created_at"} <= item.keys()
 
 
+def test_get_recent_returns_history_entry_dicts(db):
+    """get_recent returns HistoryEntry-shaped dicts (not raw sqlite Row objects)."""
+    db.add("hello", audio_ms=500, model="base.en", latency_ms=100)
+    items = db.get_recent()
+    assert len(items) == 1
+    entry = items[0]
+    assert isinstance(entry, dict)
+    assert entry["text"] == "hello"
+    assert entry["model"] == "base.en"
+    assert entry["latency_ms"] == 100
+    assert isinstance(entry["id"], int)
+    assert isinstance(entry["created_at"], str)
+
+
 def test_migration_adds_missing_columns(tmp_path):
     """Opening an old-schema DB (no model/latency_ms columns) triggers ALTER TABLE."""
     import sqlite3

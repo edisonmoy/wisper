@@ -60,7 +60,13 @@ class HotkeyManager:
     current on_start/on_stop callback returns.
     """
 
-    def __init__(self, on_start: Callable, on_stop: Callable, vk: int = _FN_VK, key_name: str = ""):
+    def __init__(
+        self,
+        on_start: Callable[[], None],
+        on_stop: Callable[[], None],
+        vk: int = _FN_VK,
+        key_name: str = "",
+    ):
         self.on_start = on_start
         self.on_stop = on_stop
         self._vk = vk
@@ -72,8 +78,33 @@ class HotkeyManager:
         self._busy = False
         self._last_event = 0.0
 
+    @property
+    def is_recording(self) -> bool:
+        return self._recording
+
     def _matches(self, key) -> bool:
         return _is_named_key(key, self._key_name) if self._key_name else _is_fn(key, self._vk)
+
+    def _dispatch(
+        self,
+        fn: Callable[[], None],
+        *,
+        rollback_recording: bool = False,
+        clear_busy: bool = True,
+    ) -> None:
+        """Run fn in a daemon thread; optionally roll back _recording and/or clear _busy."""
+
+        def _run():
+            try:
+                fn()
+            except Exception:
+                if rollback_recording:
+                    self._recording = False
+            finally:
+                if clear_busy:
+                    self._busy = False
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def start(self):
         if self._toggle_mode:
@@ -99,16 +130,7 @@ class HotkeyManager:
             return
         self._recording = True
         self._busy = True
-
-        def _run():
-            try:
-                self.on_start()
-            except Exception:
-                self._recording = False
-            finally:
-                self._busy = False
-
-        threading.Thread(target=_run, daemon=True).start()
+        self._dispatch(self.on_start, rollback_recording=True)
 
     def _on_release(self, key):
         if not self._matches(key):
@@ -119,14 +141,7 @@ class HotkeyManager:
             if not self._recording:
                 return
             self._recording = False
-
-            def _run():
-                try:
-                    self.on_stop()
-                except Exception:
-                    pass
-
-            threading.Thread(target=_run, daemon=True).start()
+            self._dispatch(self.on_stop, clear_busy=False)
             return
 
         # Toggle mode (Fn key only): each NSFlagsChanged event alternates start/stop.
@@ -140,28 +155,10 @@ class HotkeyManager:
 
         if not self._recording:
             self._recording = True
-
-            def _run():
-                try:
-                    self.on_start()
-                except Exception:
-                    self._recording = False  # roll back so state stays consistent
-                finally:
-                    self._busy = False
-
-            threading.Thread(target=_run, daemon=True).start()
+            self._dispatch(self.on_start, rollback_recording=True)
         else:
             self._recording = False
-
-            def _run():
-                try:
-                    self.on_stop()
-                except Exception:
-                    pass
-                finally:
-                    self._busy = False
-
-            threading.Thread(target=_run, daemon=True).start()
+            self._dispatch(self.on_stop)
 
     def force_reset(self):
         """Reset all internal state — called by the watchdog when things diverge."""
