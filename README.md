@@ -9,10 +9,8 @@ Inspired by and UI-compatible with [WisperFlow](https://wisprflow.ai/). If you'v
 ## Features
 
 - **One key to dictate** — hold `fn`, speak, release. Text appears at your cursor instantly.
-- **Configurable hotkey** — swap `fn` for Option, Control, Caps Lock, or an F13–F16 key from the menu bar.
 - **Fully offline** — transcription runs on-device via [OpenAI Whisper](https://github.com/openai/whisper). No audio or text ever leaves your machine.
 - **Multiple models** — switch between tiny/base/small/medium/distil-large from the menu bar.
-- **Microphone selection** — pick any connected input device from the menu bar, with automatic fallback to the system default.
 - **Text cleanup** — automatically remove filler words and polish transcriptions (see below).
 - **Clipboard-safe** — your clipboard is fully restored after every paste, including images.
 - **History** — recent transcriptions with model and latency, click any to re-copy.
@@ -50,21 +48,7 @@ If the Globe/fn key opens the emoji picker instead of recording:
 
 Hold `fn` to record, release to transcribe. Text is pasted at your cursor instantly.
 
-Access history, model selection, hotkey, microphone, and text cleanup from the menu bar icon.
-
----
-
-## Hotkey
-
-By default, hold `fn` to record. Pick a different key from **Hotkey** in the menu bar:
-
-| Key | Behavior |
-|---|---|
-| `fn` (built-in Globe key) | Toggle — tap once to start, again to stop (macOS reports both press and release as the same event) |
-| Right/Left `⌥ Option` | Push-to-talk — hold to record, release to stop |
-| Right/Left `⌃ Control` | Push-to-talk |
-| Caps Lock | Push-to-talk |
-| F13 / F14 / F15 / F16 | Push-to-talk |
+Access history, model selection, and text cleanup from the menu bar icon.
 
 ---
 
@@ -79,12 +63,6 @@ By default, hold `fn` to record. Pick a different key from **Hotkey** in the men
 | `distil-large-v3` | 1.5 GB | ~4 s (best accuracy/speed) |
 
 Models download on first use and are cached at `~/.cache/huggingface/`. Switch anytime from the menu bar.
-
----
-
-## Microphone
-
-Wisper uses your system's default input device unless you pick a specific one from **Microphone** in the menu bar. If a previously selected device is disconnected, Wisper automatically falls back to the system default.
 
 ---
 
