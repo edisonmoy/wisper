@@ -12,11 +12,13 @@ import setproctitle
 
 setproctitle.setproctitle("Wisper")
 
-# Hide from Dock. Must be set before rumps touches NSApplication.
-# The Info.plist LSUIElement key is ignored because NSBundle.mainBundle()
-# resolves to the Python framework, not Wisper.app, with a shell launcher.
+# Hide from Dock while keeping the menu bar status item. Must be set before
+# rumps touches NSApplication. The Info.plist LSUIElement key is ignored
+# because NSBundle.mainBundle() resolves to the Python framework, not
+# Wisper.app, with a shell launcher. Prohibited (rather than Accessory) also
+# suppresses the NSStatusItem, so it must not be used here.
 AppKit.NSApplication.sharedApplication().setActivationPolicy_(
-    AppKit.NSApplicationActivationPolicyProhibited
+    AppKit.NSApplicationActivationPolicyAccessory
 )
 
 from config import APP_DIR, CLEANUP_MODES, MODELS, REPO_DIR, Config
