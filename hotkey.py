@@ -120,6 +120,12 @@ class HotkeyManager:
     def stop(self):
         if self._listener:
             self._listener.stop()
+            # Join before returning: pynput's macOS backend reads the keyboard
+            # input source (Carbon TSM) from the listener thread on startup.
+            # If a new listener starts while this one is still tearing down,
+            # the two threads can race on that TSM call and macOS aborts the
+            # process with a dispatch_assert_queue crash.
+            self._listener.join()
             self._listener = None
 
     def _on_press(self, key):
