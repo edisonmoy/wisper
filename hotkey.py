@@ -1,8 +1,40 @@
+import contextlib
 import threading
 import time
 from typing import Callable
 
 from pynput import keyboard
+
+
+def _prime_pynput_keycode_context() -> None:
+    """Resolve pynput's macOS keyboard-layout lookup once, on the main thread.
+
+    pynput's Darwin Listener calls Carbon's TIS/TSM APIs
+    (TISCopyCurrentKeyboardInputSource) on its own background thread every
+    time it starts, to figure out the current keyboard layout. Newer macOS
+    versions assert that these calls happen on the main thread and abort
+    the process (SIGTRAP) if a listener thread does it — which happened
+    here every time the hotkey was changed and a new listener started.
+    This module is imported on the main thread, so do the lookup here once
+    and monkeypatch pynput to reuse the cached result, so listener threads
+    never call Carbon directly.
+    """
+    try:
+        import pynput.keyboard._darwin as _darwin
+    except ImportError:
+        return
+
+    with _darwin.keycode_context() as cached:
+        pass
+
+    @contextlib.contextmanager
+    def _cached_keycode_context():
+        yield cached
+
+    _darwin.keycode_context = _cached_keycode_context
+
+
+_prime_pynput_keycode_context()
 
 # macOS virtual key code for fn / Globe key (kVK_Function = 63).
 # pynput fires on_release for NSFlagsChanged events (both press and release),
