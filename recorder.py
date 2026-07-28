@@ -52,10 +52,16 @@ class AudioRecorder:
                 self._stream = sd.InputStream(**stream_kwargs)
             except Exception:
                 if self.device is None:
-                    raise
-                logger.warning("Device %r unavailable; falling back to system default", self.device)
-                stream_kwargs["device"] = None
-                self._stream = sd.InputStream(**stream_kwargs)
+                    self._stream = _retry_after_rescan(sd, stream_kwargs)
+                else:
+                    logger.warning(
+                        "Device %r unavailable; falling back to system default", self.device
+                    )
+                    stream_kwargs["device"] = None
+                    try:
+                        self._stream = sd.InputStream(**stream_kwargs)
+                    except Exception:
+                        self._stream = _retry_after_rescan(sd, stream_kwargs)
             self._stream.start()
 
     def stop(self) -> np.ndarray | None:
@@ -80,3 +86,17 @@ class AudioRecorder:
     def duration_ms(self) -> int:
         samples = sum(len(b) for b in self._buffer)
         return int(samples / SAMPLE_RATE * 1000)
+
+
+def _retry_after_rescan(sd, stream_kwargs):
+    """Retry opening the stream once after forcing PortAudio to rescan devices.
+
+    PortAudio snapshots the CoreAudio device list once at startup and never
+    notices devices connecting/disconnecting afterward (e.g. Bluetooth
+    headphones going in and out of range). In a long-running process this
+    makes an otherwise-fine device fail to open with a stale-property error.
+    Re-initializing PortAudio forces it to pick up the current device list.
+    """
+    sd._terminate()
+    sd._initialize()
+    return sd.InputStream(**stream_kwargs)

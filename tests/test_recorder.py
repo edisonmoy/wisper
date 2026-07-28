@@ -140,14 +140,52 @@ def test_start_falls_back_to_system_default_on_device_error(recorder):
     assert second_call_kwargs["device"] is None
 
 
-def test_start_does_not_fallback_when_system_default_fails(recorder):
+def test_start_raises_when_system_default_fails_even_after_rescan(recorder):
     recorder.device = None
     mock_sd = MagicMock()
     mock_sd.InputStream.side_effect = OSError("no audio hardware")
     with _mock_sd(mock_sd):
         with pytest.raises(OSError):
             recorder.start()
-    assert mock_sd.InputStream.call_count == 1
+    # One initial attempt, then one retry after forcing PortAudio to rescan.
+    assert mock_sd.InputStream.call_count == 2
+    assert mock_sd._terminate.called
+    assert mock_sd._initialize.called
+
+
+def test_start_retries_after_rescan_when_system_default_fails(recorder):
+    """A stale PortAudio device cache (e.g. after Bluetooth headphones
+    reconnect) can make the system default fail to open even though it's
+    fine — rescanning devices and retrying once should recover."""
+    recorder.device = None
+    mock_sd = MagicMock()
+    good_stream = MagicMock()
+    mock_sd.InputStream.side_effect = [OSError("stale device"), good_stream]
+    with _mock_sd(mock_sd):
+        recorder.start()
+    assert mock_sd.InputStream.call_count == 2
+    assert mock_sd._terminate.called
+    assert mock_sd._initialize.called
+
+
+def test_start_retries_after_rescan_when_fallback_also_fails(recorder):
+    recorder.device = "AirPods Pro"
+    mock_sd = MagicMock()
+    good_stream = MagicMock()
+    # Named device fails, fallback to system default also fails, then a
+    # rescan-and-retry of the system default succeeds.
+    mock_sd.InputStream.side_effect = [
+        OSError("paInvalidDevice"),
+        OSError("stale device"),
+        good_stream,
+    ]
+    with _mock_sd(mock_sd):
+        recorder.start()
+    assert mock_sd.InputStream.call_count == 3
+    assert mock_sd._terminate.called
+    assert mock_sd._initialize.called
+    last_call_kwargs = mock_sd.InputStream.call_args_list[-1][1]
+    assert last_call_kwargs["device"] is None
 
 
 def test_start_while_already_recording_is_noop(recorder):
