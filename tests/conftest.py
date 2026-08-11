@@ -153,6 +153,9 @@ def _install_macos_mocks():
             self._menuitem = MagicMock()
             self._items: dict = {}
 
+        def set_callback(self, callback):
+            self.callback = callback
+
         def __setitem__(self, k, v):
             self._items[k] = v
 

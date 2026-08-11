@@ -405,8 +405,14 @@ class WisperApp(rumps.App):
         try:
             import ApplicationServices  # type: ignore  # macOS-only
 
-            if not ApplicationServices.AXIsProcessTrusted():
+            # Passing the prompt option actually triggers macOS's native
+            # Accessibility permission dialog (and registers the app in
+            # System Settings) the first time it runs. A bare
+            # AXIsProcessTrusted() call never surfaces that dialog.
+            options = {ApplicationServices.kAXTrustedCheckOptionPrompt: True}
+            if not ApplicationServices.AXIsProcessTrustedWithOptions(options):
                 self.status_item.title = "⚠ Grant Accessibility — System Settings"
+                self.status_item.set_callback(self._open_accessibility_settings)
                 logger.warning("Accessibility permission not granted")
                 self._notify(
                     "Accessibility permission required",
@@ -414,6 +420,15 @@ class WisperApp(rumps.App):
                 )
         except Exception:
             pass  # not on macOS or permission API unavailable
+
+    def _open_accessibility_settings(self, _sender=None):
+        subprocess.run(
+            [
+                "open",
+                "x-apple.systempreferences:com.apple.preference.security"
+                "?Privacy_Accessibility",
+            ]
+        )
 
     # --------------------------------------------------------------- hotkey
 
