@@ -508,19 +508,41 @@ def test_check_permissions_noop_when_import_fails(wa):
 
 def test_check_permissions_warns_when_not_trusted(wa):
     app_svc = MagicMock()
-    app_svc.AXIsProcessTrusted.return_value = False
+    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
+    app_svc.AXIsProcessTrustedWithOptions.return_value = False
     with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
         wa._check_permissions()
     wa._mock_notification.assert_called()
+    app_svc.AXIsProcessTrustedWithOptions.assert_called_once_with(
+        {"AXTrustedCheckOptionPrompt": True}
+    )
 
 
 def test_check_permissions_silent_when_trusted(wa):
     wa._mock_notification.reset_mock()
     app_svc = MagicMock()
-    app_svc.AXIsProcessTrusted.return_value = True
+    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
+    app_svc.AXIsProcessTrustedWithOptions.return_value = True
     with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
         wa._check_permissions()
     wa._mock_notification.assert_not_called()
+
+
+def test_check_permissions_status_item_opens_settings_when_clicked(wa):
+    app_svc = MagicMock()
+    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
+    app_svc.AXIsProcessTrustedWithOptions.return_value = False
+    with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
+        wa._check_permissions()
+    with patch("app.subprocess.run") as mock_run:
+        wa.status_item.callback(wa.status_item)
+    mock_run.assert_called_once_with(
+        [
+            "open",
+            "x-apple.systempreferences:com.apple.preference.security"
+            "?Privacy_Accessibility",
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
