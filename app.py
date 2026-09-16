@@ -299,18 +299,25 @@ class WisperApp(rumps.App):
         self.postprocessor.set_mode(mode)
         self._sync_cleanup_checkmarks()
 
-    def _configure_nsapp(self):
-        """One-time deferred setup that requires the NSApp run loop to be running."""
+    def _configure_nsapp(self) -> bool:
+        """Deferred setup that requires the NSApp run loop to be running.
+
+        Returns whether it actually configured the icon. The status item's
+        button can be momentarily unavailable (e.g. still negotiating space
+        in a crowded menu bar) on the very first tick — _ui_tick retries on
+        later ticks instead of giving up, or the icon stays blank forever.
+        """
         nssi = self._nsapp.nsstatusitem
         btn = nssi.button()
-        if btn is not None:
-            btn.setImage_(_make_menubar_image())
-            btn.setTitle_("")
+        if btn is None:
+            return False
+        btn.setImage_(_make_menubar_image())
+        btn.setTitle_("")
+        return True
 
     def _ui_tick(self, _):
         if not self._nsapp_configured:
-            self._configure_nsapp()
-            self._nsapp_configured = True
+            self._nsapp_configured = self._configure_nsapp()
         # Quit must happen on the main thread; background install sets this state.
         if self._update_state == "restarting":
             rumps.quit_application()

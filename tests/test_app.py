@@ -243,10 +243,22 @@ def test_configure_nsapp_calls_set_image_when_button_present(wa):
     btn.setTitle_.assert_called_once_with("")
 
 
+def test_configure_nsapp_returns_true_when_button_present(wa):
+    wa._nsapp = MagicMock()
+    wa._nsapp.nsstatusitem.button.return_value = MagicMock()
+    assert wa._configure_nsapp() is True
+
+
 def test_configure_nsapp_skips_image_when_no_button(wa):
     wa._nsapp = MagicMock()
     wa._nsapp.nsstatusitem.button.return_value = None
     wa._configure_nsapp()  # must not raise
+
+
+def test_configure_nsapp_returns_false_when_no_button(wa):
+    wa._nsapp = MagicMock()
+    wa._nsapp.nsstatusitem.button.return_value = None
+    assert wa._configure_nsapp() is False
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +268,7 @@ def test_configure_nsapp_skips_image_when_no_button(wa):
 
 def test_ui_tick_calls_configure_nsapp_on_first_tick(wa):
     wa._nsapp_configured = False
-    with patch.object(wa, "_configure_nsapp") as mock_cfg:
+    with patch.object(wa, "_configure_nsapp", return_value=True) as mock_cfg:
         with patch.object(wa, "_watchdog"):
             wa._ui_tick(None)
     mock_cfg.assert_called_once()
@@ -269,6 +281,23 @@ def test_ui_tick_does_not_reconfigure_after_first_tick(wa):
         with patch.object(wa, "_watchdog"):
             wa._ui_tick(None)
     mock_cfg.assert_not_called()
+
+
+def test_ui_tick_retries_configure_nsapp_when_button_not_yet_ready(wa):
+    """If the status item button isn't ready on the first tick, later ticks retry
+    instead of permanently leaving the menu bar icon blank."""
+    wa._nsapp_configured = False
+    with patch.object(wa, "_configure_nsapp", return_value=False) as mock_cfg:
+        with patch.object(wa, "_watchdog"):
+            wa._ui_tick(None)
+    assert wa._nsapp_configured is False
+    mock_cfg.assert_called_once()
+
+    with patch.object(wa, "_configure_nsapp", return_value=True) as mock_cfg2:
+        with patch.object(wa, "_watchdog"):
+            wa._ui_tick(None)
+    assert wa._nsapp_configured is True
+    mock_cfg2.assert_called_once()
 
 
 def test_ui_tick_quits_when_restarting(wa):
