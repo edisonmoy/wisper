@@ -12,6 +12,7 @@ Inspired by and UI-compatible with [WisperFlow](https://wisprflow.ai/). If you'v
 - **Fully offline** — transcription runs on-device via [OpenAI Whisper](https://github.com/openai/whisper). No audio or text ever leaves your machine.
 - **Multiple models** — switch between tiny/base/small/medium/distil-large from the menu bar.
 - **Text cleanup** — automatically remove filler words and polish transcriptions (see below).
+- **Custom dictionary** — teach Wisper names, acronyms, and jargon it should recognize (see below).
 - **Clipboard-safe** — your clipboard is fully restored after every paste, including images.
 - **History** — recent transcriptions with model and latency, click any to re-copy.
 
@@ -81,6 +82,14 @@ Choose a cleanup mode from **Text Cleanup** in the menu bar:
 The AI mode runs a small language model **entirely on your device** — no internet connection, no cloud API. It uses Apple's [MLX](https://github.com/ml-explore/mlx) framework to run [Qwen 2.5 0.5B](https://huggingface.co/mlx-community/Qwen2.5-0.5B-Instruct-4bit) (~400 MB) on Apple Silicon's Neural Engine and GPU.
 
 **Apple Silicon only (M1 and later).** On Intel Macs, AI mode silently falls back to Basic. The model downloads automatically on first use and is cached at `~/.cache/huggingface/`.
+
+---
+
+## Dictionary
+
+Add names, acronyms, or technical jargon that Whisper tends to mishear from **Dictionary** in the menu bar. Entries bias transcription toward the correct spelling (via faster-whisper's `hotwords`) without forcing them to appear when they weren't actually said.
+
+Click **Add Word…** to add an entry, or click any existing entry to remove it. Entries are stored in `~/.wisper/config.json`.
 
 ---
 

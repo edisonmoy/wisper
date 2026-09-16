@@ -1,5 +1,5 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 REPO_DIR = Path(__file__).parent.resolve()
@@ -18,6 +18,7 @@ class Config:
     hotkey_vk: int = 63  # macOS virtual key code; 63 = built-in Fn/Globe key
     hotkey_key: str = ""  # pynput Key name (e.g. "alt_r"); if set, overrides hotkey_vk
     mic_name: str = ""  # sounddevice device name; empty = system default
+    dictionary: list[str] = field(default_factory=list)  # custom words/phrases to bias STT
 
     def __post_init__(self):
         if self.model not in MODELS:
@@ -32,6 +33,12 @@ class Config:
             self.hotkey_key = ""
         if not isinstance(self.mic_name, str):
             self.mic_name = ""
+        if not isinstance(self.dictionary, list) or not all(
+            isinstance(w, str) for w in self.dictionary
+        ):
+            self.dictionary = []
+        else:
+            self.dictionary = [w.strip() for w in self.dictionary if w.strip()]
 
     @classmethod
     def load(cls) -> "Config":

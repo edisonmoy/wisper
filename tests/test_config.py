@@ -106,3 +106,40 @@ def test_mic_name_roundtrip(tmp_path, monkeypatch):
     cfg.save()
     loaded = Config.load()
     assert loaded.mic_name == "AirPods Pro"
+
+
+def test_dictionary_defaults_to_empty_list():
+    cfg = Config()
+    assert cfg.dictionary == []
+
+
+def test_dictionary_default_is_not_shared_between_instances():
+    a = Config()
+    b = Config()
+    a.dictionary.append("Anthropic")
+    assert b.dictionary == []
+
+
+def test_post_init_corrects_invalid_dictionary_type():
+    cfg = Config(dictionary="not-a-list")
+    assert cfg.dictionary == []
+
+
+def test_post_init_corrects_dictionary_with_non_string_items():
+    cfg = Config(dictionary=["Anthropic", 42])
+    assert cfg.dictionary == []
+
+
+def test_post_init_strips_and_drops_blank_dictionary_entries():
+    cfg = Config(dictionary=["  Anthropic  ", "", "   "])
+    assert cfg.dictionary == ["Anthropic"]
+
+
+def test_dictionary_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_module, "APP_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "CONFIG_FILE", tmp_path / "config.json")
+
+    cfg = Config(dictionary=["Anthropic", "faster-whisper"])
+    cfg.save()
+    loaded = Config.load()
+    assert loaded.dictionary == ["Anthropic", "faster-whisper"]

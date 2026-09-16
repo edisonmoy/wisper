@@ -265,6 +265,10 @@ class WisperApp(rumps.App):
         self.mic_menu = rumps.MenuItem(self._mic_label())
         self._build_mic_submenu()
 
+        self.dictionary_items: dict[str, rumps.MenuItem] = {}
+        self.dictionary_menu = rumps.MenuItem("Dictionary")
+        self._build_dictionary_menu()
+
         self.update_item = rumps.MenuItem("Check for Updates", callback=self._update_action)
 
         self.menu = [
@@ -273,6 +277,7 @@ class WisperApp(rumps.App):
             self.history_menu,
             model_menu,
             cleanup_menu,
+            self.dictionary_menu,
             self.hotkey_menu,
             self.mic_menu,
             None,
@@ -492,6 +497,56 @@ class WisperApp(rumps.App):
         self._sync_mic_checkmarks()
         logger.info("Microphone changed to: %s", name or "System Default")
 
+    # ---------------------------------------------------------- dictionary
+
+    def _build_dictionary_menu(self):
+        _clear_menu(self.dictionary_menu)
+        self.dictionary_items = {}
+
+        self.dictionary_menu["__add__"] = rumps.MenuItem(
+            "Add Word…", callback=self._add_dictionary_word
+        )
+
+        for word in self.config.dictionary:
+            item = rumps.MenuItem(word, callback=lambda _, w=word: self._remove_dictionary_word(w))
+            self.dictionary_menu[f"word:{word}"] = item
+            self.dictionary_items[word] = item
+
+        if self.config.dictionary:
+            self.dictionary_menu["__clear__"] = rumps.MenuItem(
+                "— Clear Dictionary", callback=self._clear_dictionary
+            )
+
+    def _add_dictionary_word(self, _):
+        resp = rumps.Window(
+            message="Word or phrase to help Wisper recognize (e.g. a name, acronym, or jargon term).",  # noqa: E501
+            title="Add to Dictionary",
+            ok="Add",
+            cancel="Cancel",
+            dimensions=(240, 20),
+        ).run()
+        if not resp.clicked:
+            return
+        word = resp.text.strip()
+        if not word or any(w.lower() == word.lower() for w in self.config.dictionary):
+            return
+        self.config.dictionary.append(word)
+        self.config.save()
+        self._build_dictionary_menu()
+        logger.info("Dictionary: added %r", word)
+
+    def _remove_dictionary_word(self, word: str):
+        self.config.dictionary = [w for w in self.config.dictionary if w != word]
+        self.config.save()
+        self._build_dictionary_menu()
+        logger.info("Dictionary: removed %r", word)
+
+    def _clear_dictionary(self, _):
+        self.config.dictionary = []
+        self.config.save()
+        self._build_dictionary_menu()
+        logger.info("Dictionary: cleared")
+
     # ------------------------------------------------------------ recording
 
     def _on_fn_down(self):
@@ -521,7 +576,8 @@ class WisperApp(rumps.App):
 
         try:
             t0 = time.monotonic()
-            text = self.transcriber.transcribe(audio)
+            hotwords = ", ".join(self.config.dictionary)
+            text = self.transcriber.transcribe(audio, hotwords=hotwords)
             latency_ms = int((time.monotonic() - t0) * 1000)
             logger.info("Transcribed %d ms audio in %d ms", audio_ms, latency_ms)
         except Exception as exc:

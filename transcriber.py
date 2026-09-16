@@ -13,7 +13,7 @@ class Transcriber:
         """Load model in background so first use isn't slow."""
         threading.Thread(target=self._ensure_loaded, daemon=True).start()
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, hotwords: str = "") -> str:
         self._ensure_loaded()
         # .en models only understand English; multilingual models auto-detect.
         language = "en" if self.model_name.endswith(".en") else None
@@ -24,6 +24,10 @@ class Transcriber:
             condition_on_previous_text=False,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
+            # Biases recognition toward user-supplied names/jargon without
+            # forcing them to appear (unlike initial_prompt, it won't leak
+            # placeholder text into output when the audio doesn't match).
+            hotwords=hotwords or None,
         )
         return " ".join(seg.text for seg in segments).strip()
 

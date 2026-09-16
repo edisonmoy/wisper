@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 import app as app_mod
+import config as config_module
 from app import (
     _CLEANUP_LABELS,
     _HOTKEY_PRESETS,
@@ -34,8 +35,15 @@ from app import (
 
 @pytest.fixture
 def tmp_app_dir(tmp_path, monkeypatch):
-    """Redirect APP_DIR to a temp directory so tests don't touch ~/.wisper."""
+    """Redirect APP_DIR to a temp directory so tests don't touch ~/.wisper.
+
+    Also redirects config.py's own APP_DIR/CONFIG_FILE globals — Config.load()/
+    save() read those directly, not app.APP_DIR, so both must be patched or
+    WisperApp() would read and overwrite the real ~/.wisper/config.json.
+    """
     monkeypatch.setattr(app_mod, "APP_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "APP_DIR", tmp_path)
+    monkeypatch.setattr(config_module, "CONFIG_FILE", tmp_path / "config.json")
     return tmp_path
 
 
@@ -1206,3 +1214,140 @@ def test_get_input_devices_returns_input_device_names():
     with patch.dict(sys.modules, {"sounddevice": fake_sd}):
         result = _get_input_devices()
     assert result == ["Built-in Mic", "AirPods"]
+
+
+# ---------------------------------------------------------------------------
+# dictionary submenu
+# ---------------------------------------------------------------------------
+
+
+def _patch_window(clicked: bool, text: str = ""):
+    """Patch rumps.Window so `.run()` returns a response with the given clicked/text."""
+    resp = MagicMock()
+    resp.clicked = clicked
+    resp.text = text
+    window_instance = MagicMock()
+    window_instance.run.return_value = resp
+    return patch.object(app_mod.rumps, "Window", return_value=window_instance)
+
+
+def test_build_menu_creates_dictionary_menu(wa):
+    assert wa.dictionary_menu is not None
+
+
+def test_dictionary_menu_has_add_item(wa):
+    assert "__add__" in wa.dictionary_menu.keys()
+
+
+def test_dictionary_menu_starts_empty(wa):
+    assert wa.dictionary_items == {}
+
+
+def test_dictionary_menu_has_no_clear_item_when_empty(wa):
+    assert "__clear__" not in wa.dictionary_menu.keys()
+
+
+def test_build_dictionary_menu_populates_items_from_config(wa):
+    wa.config.dictionary = ["Anthropic", "faster-whisper"]
+    wa._build_dictionary_menu()
+    assert set(wa.dictionary_items.keys()) == {"Anthropic", "faster-whisper"}
+
+
+def test_build_dictionary_menu_shows_clear_item_when_nonempty(wa):
+    wa.config.dictionary = ["Anthropic"]
+    wa._build_dictionary_menu()
+    assert "__clear__" in wa.dictionary_menu.keys()
+
+
+def test_build_dictionary_menu_clears_stale_items(wa):
+    wa.config.dictionary = ["Old Word"]
+    wa._build_dictionary_menu()
+    wa.config.dictionary = ["New Word"]
+    wa._build_dictionary_menu()
+    assert "Old Word" not in wa.dictionary_items
+    assert "New Word" in wa.dictionary_items
+
+
+def test_add_dictionary_word_cancelled_does_nothing(wa):
+    with _patch_window(False, "Anthropic"):
+        wa._add_dictionary_word(None)
+    assert wa.config.dictionary == []
+
+
+def test_add_dictionary_word_blank_text_ignored(wa):
+    with _patch_window(True, "   "):
+        wa._add_dictionary_word(None)
+    assert wa.config.dictionary == []
+
+
+def test_add_dictionary_word_appends_and_saves(wa):
+    with _patch_window(True, "Anthropic"):
+        with patch.object(wa.config, "save") as mock_save:
+            wa._add_dictionary_word(None)
+    assert wa.config.dictionary == ["Anthropic"]
+    mock_save.assert_called_once()
+    assert "Anthropic" in wa.dictionary_items
+
+
+def test_add_dictionary_word_strips_whitespace(wa):
+    with _patch_window(True, "  Claude  "):
+        wa._add_dictionary_word(None)
+    assert wa.config.dictionary == ["Claude"]
+
+
+def test_add_dictionary_word_rejects_case_insensitive_duplicate(wa):
+    wa.config.dictionary = ["Anthropic"]
+    with _patch_window(True, "anthropic"):
+        wa._add_dictionary_word(None)
+    assert wa.config.dictionary == ["Anthropic"]
+
+
+def test_remove_dictionary_word_removes_only_matching_word(wa):
+    wa.config.dictionary = ["Anthropic", "Claude"]
+    wa._build_dictionary_menu()
+    wa._remove_dictionary_word("Anthropic")
+    assert wa.config.dictionary == ["Claude"]
+    assert "Anthropic" not in wa.dictionary_items
+    assert "Claude" in wa.dictionary_items
+
+
+def test_remove_dictionary_word_saves_config(wa):
+    wa.config.dictionary = ["Anthropic"]
+    with patch.object(wa.config, "save") as mock_save:
+        wa._remove_dictionary_word("Anthropic")
+    mock_save.assert_called_once()
+
+
+def test_clear_dictionary_empties_list_and_saves(wa):
+    wa.config.dictionary = ["Anthropic", "Claude"]
+    wa._build_dictionary_menu()
+    with patch.object(wa.config, "save") as mock_save:
+        wa._clear_dictionary(None)
+    assert wa.config.dictionary == []
+    assert wa.dictionary_items == {}
+    mock_save.assert_called_once()
+
+
+def test_on_fn_up_passes_dictionary_as_hotwords(wa):
+    wa.config.dictionary = ["Anthropic", "Claude"]
+    with patch.object(wa.recorder, "duration_ms", return_value=1000):
+        with patch.object(wa.recorder, "stop", return_value=np.zeros(16000)):
+            with patch.object(wa.transcriber, "transcribe", return_value="hi") as mock_tx:
+                with patch.object(wa.postprocessor, "clean", return_value="hi"):
+                    with patch.object(wa, "_paste"):
+                        with patch.object(wa.db, "add"):
+                            wa._on_fn_up()
+    kwargs = mock_tx.call_args[1]
+    assert kwargs["hotwords"] == "Anthropic, Claude"
+
+
+def test_on_fn_up_passes_empty_hotwords_when_dictionary_empty(wa):
+    with patch.object(wa.recorder, "duration_ms", return_value=1000):
+        with patch.object(wa.recorder, "stop", return_value=np.zeros(16000)):
+            with patch.object(wa.transcriber, "transcribe", return_value="hi") as mock_tx:
+                with patch.object(wa.postprocessor, "clean", return_value="hi"):
+                    with patch.object(wa, "_paste"):
+                        with patch.object(wa.db, "add"):
+                            wa._on_fn_up()
+    kwargs = mock_tx.call_args[1]
+    assert kwargs["hotwords"] == ""

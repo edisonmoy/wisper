@@ -196,3 +196,33 @@ def test_vad_filter_enabled():
         t.transcribe(np.zeros(100, dtype="float32"))
     kwargs = mock.transcribe.call_args[1]
     assert kwargs.get("vad_filter") is True
+
+
+# ---------------------------------------------------------------- hotwords
+
+
+def test_hotwords_defaults_to_none():
+    t = Transcriber("base.en")
+    mock = _mock_whisper([_Seg("text")])
+    with _patch_fw(mock):
+        t.transcribe(np.zeros(100, dtype="float32"))
+    kwargs = mock.transcribe.call_args[1]
+    assert kwargs.get("hotwords") is None
+
+
+def test_hotwords_passed_through():
+    t = Transcriber("base.en")
+    mock = _mock_whisper([_Seg("text")])
+    with _patch_fw(mock):
+        t.transcribe(np.zeros(100, dtype="float32"), hotwords="Anthropic, faster-whisper")
+    kwargs = mock.transcribe.call_args[1]
+    assert kwargs.get("hotwords") == "Anthropic, faster-whisper"
+
+
+def test_empty_hotwords_string_becomes_none():
+    t = Transcriber("base.en")
+    mock = _mock_whisper([_Seg("text")])
+    with _patch_fw(mock):
+        t.transcribe(np.zeros(100, dtype="float32"), hotwords="")
+    kwargs = mock.transcribe.call_args[1]
+    assert kwargs.get("hotwords") is None
