@@ -20,7 +20,5 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Wisper records audio for speech-to-text transcription.</string>
-    <key>NSAppleEventsUsageDescription</key>
-    <string>Wisper uses System Events to paste transcribed text.</string>
 </dict>
 </plist>

@@ -39,6 +39,10 @@ config.py         Config dataclass; JSON persistence; validation
 history.py        HistoryDB — SQLite CRUD for transcription history
 hotkey.py         HotkeyManager — fn key press/release detection
 overlay.py        RecordingOverlay — floating waveform panel
+permissions.py    macOS permission status checks and requests
+launcher.c        Native Wisper.app launcher (spawns Python so permissions show as "Wisper")
+build_app.sh      Compiles launcher.c and builds/signs Wisper.app
+setup_window.py   First-run permission checklist window
 postprocessor.py  PostProcessor — regex + optional MLX text cleanup
 recorder.py       AudioRecorder — sounddevice microphone capture
 transcriber.py    Transcriber — faster-whisper inference wrapper

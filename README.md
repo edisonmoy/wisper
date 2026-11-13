@@ -27,15 +27,24 @@ bash install.sh
 ```
 
 The installer sets up a virtual environment, builds `Wisper.app`, and registers it as a login item so it starts automatically.
+Building the app's small native launcher needs `clang` from the Xcode Command Line Tools
+(`xcode-select --install` if you don't have it).
 
 ### Required permissions
 
-macOS will prompt on first use. Grant both:
+On first launch Wisper opens a **Set up Wisper** checklist with one step per permission:
 
-1. **Accessibility** — System Settings → Privacy & Security → Accessibility → enable Wisper
-2. **Microphone** — System Settings → Privacy & Security → Microphone → enable Wisper
+1. **Microphone** — click **Allow** and accept the macOS prompt.
+2. **Accessibility** — click **Open Settings** and turn on the **Wisper** toggle. If it isn't in
+   the list, drag the Wisper icon from the checklist into it.
 
-If either permission is missing, Wisper shows a warning in the menu bar.
+Each step gets a green checkmark as soon as macOS reports it granted — no restart needed. Reopen
+the checklist any time from the menu bar via **Permissions…**.
+
+> **Upgrading from an older version?** Earlier builds started Python from a shell script, so
+> macOS listed the permissions under `python3.11` (or similar). Wisper now ships a native
+> launcher, so it appears as **Wisper** — grant the two permissions once more, then remove the
+> old `python3.x` entries from the Microphone and Accessibility lists if you like.
 
 ### fn key conflict
 

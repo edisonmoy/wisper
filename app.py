@@ -25,8 +25,10 @@ from config import APP_DIR, CLEANUP_MODES, MODELS, REPO_DIR, Config
 from history import HistoryDB
 from hotkey import HotkeyManager, key_display_name
 from overlay import create_recording_overlay
+from permissions import accessibility_status, all_granted
 from postprocessor import PostProcessor
 from recorder import AudioRecorder
+from setup_window import create_setup_window
 from transcriber import Transcriber
 from updater import check_for_updates, install_update
 from utils import format_age
@@ -116,6 +118,30 @@ def _make_menubar_image():
     return img
 
 
+_KVK_ANSI_V = 9
+
+
+def _send_cmd_v() -> bool:
+    """Post a synthetic ⌘V to the frontmost app.
+
+    Uses CGEventPost directly rather than AppleScript's System Events, which
+    needs a separate Automation permission on top of Accessibility. macOS
+    silently drops posted events from untrusted processes, so report failure
+    based on the Accessibility status.
+    """
+    if accessibility_status() != "granted":
+        return False
+    import Quartz  # type: ignore  # macOS-only
+
+    source = Quartz.CGEventSourceCreate(Quartz.kCGEventSourceStateCombinedSessionState)
+    for key_down in (True, False):
+        event = Quartz.CGEventCreateKeyboardEvent(source, _KVK_ANSI_V, key_down)
+        # Set (not OR) the flags so a still-held hotkey modifier doesn't leak in.
+        Quartz.CGEventSetFlags(event, Quartz.kCGEventFlagMaskCommand)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+    return True
+
+
 class UpdateManager:
     """Thread-safe update state machine and menu-item renderer.
 
@@ -192,6 +218,10 @@ class WisperApp(rumps.App):
         # _nsapp (rumps internals) is only created inside run(); defer NSStatusItem
         # customisation to the first _ui_tick so the run loop has already started.
         self._nsapp_configured = False
+
+        self.setup_window = create_setup_window(self._on_permissions_changed)
+        self._ax_granted = accessibility_status() == "granted"
+        self._show_setup_pending = False
 
         self._build_menu()
         self._setup_hotkey()
@@ -281,6 +311,7 @@ class WisperApp(rumps.App):
             self.hotkey_menu,
             self.mic_menu,
             None,
+            rumps.MenuItem("Permissions…", callback=self._open_setup),
             self.update_item,
             rumps.MenuItem("Quit Wisper", callback=self._quit),
         ]
@@ -318,6 +349,10 @@ class WisperApp(rumps.App):
     def _ui_tick(self, _):
         if not self._nsapp_configured:
             self._nsapp_configured = self._configure_nsapp()
+        # Windows can only be brought forward once the run loop is going.
+        if self._show_setup_pending:
+            self._show_setup_pending = False
+            self._open_setup()
         # Quit must happen on the main thread; background install sets this state.
         if self._update_state == "restarting":
             rumps.quit_application()
@@ -413,34 +448,35 @@ class WisperApp(rumps.App):
     # ---------------------------------------------------------- permissions
 
     def _check_permissions(self):
-        """Warn the user if required macOS permissions are missing."""
-        try:
-            import ApplicationServices  # type: ignore  # macOS-only
+        """On launch, open the setup checklist if any permission is still missing."""
+        if all_granted():
+            return
+        logger.warning("Permissions missing; showing setup checklist")
+        self._show_permission_warning()
+        self._show_setup_pending = True
 
-            # Passing the prompt option actually triggers macOS's native
-            # Accessibility permission dialog (and registers the app in
-            # System Settings) the first time it runs. A bare
-            # AXIsProcessTrusted() call never surfaces that dialog.
-            options = {ApplicationServices.kAXTrustedCheckOptionPrompt: True}
-            if not ApplicationServices.AXIsProcessTrustedWithOptions(options):
-                self.status_item.title = "⚠ Grant Accessibility — System Settings"
-                self.status_item.set_callback(self._open_accessibility_settings)
-                logger.warning("Accessibility permission not granted")
-                self._notify(
-                    "Accessibility permission required",
-                    "System Settings → Privacy & Security → Accessibility",
-                )
-        except Exception:
-            pass  # not on macOS or permission API unavailable
+    def _show_permission_warning(self):
+        self.status_item.title = "⚠ Finish setup — grant permissions"
+        self.status_item.set_callback(self._open_setup)
 
-    def _open_accessibility_settings(self, _sender=None):
-        subprocess.run(
-            [
-                "open",
-                "x-apple.systempreferences:com.apple.preference.security"
-                "?Privacy_Accessibility",
-            ]
-        )
+    def _open_setup(self, _sender=None):
+        self.setup_window.show_(None)
+
+    def _on_permissions_changed(self, statuses: dict[str, str]):
+        """Called on the main thread by the checklist whenever a status flips."""
+        ax_granted = statuses.get("ax") == "granted"
+        if ax_granted and not self._ax_granted:
+            # The keyboard event tap fails to attach without Accessibility and
+            # pynput doesn't retry, so start a fresh listener now that it's on.
+            logger.info("Accessibility granted; restarting hotkey listener")
+            self._setup_hotkey()
+        self._ax_granted = ax_granted
+
+        if all(s == "granted" for s in statuses.values()):
+            self.status_item.title = self._idle_title()
+            self.status_item.set_callback(None)
+        else:
+            self._show_permission_warning()
 
     # --------------------------------------------------------------- hotkey
 
@@ -628,20 +664,8 @@ class WisperApp(rumps.App):
         self._pasting = True
         self._pending_restore = None  # discard any unprocessed previous restore
         subprocess.run(["pbcopy"], input=text.encode(), check=True)
-        result = subprocess.run(
-            [
-                "osascript",
-                "-e",
-                'tell application "System Events" to keystroke "v" using command down',
-            ],
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            logger.error(
-                "Paste via osascript failed (rc=%d): %s",
-                result.returncode,
-                result.stderr.decode(errors="replace"),
-            )
+        if not _send_cmd_v():
+            logger.error("Paste failed: Accessibility permission not granted")
             self._notify("Paste failed", "Could not paste text — check Accessibility permission")
         # Set restore payload before clearing the flag so _ui_tick always sees
         # both fields in a consistent state (Python GIL makes each assignment atomic).

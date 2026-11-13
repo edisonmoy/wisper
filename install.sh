@@ -26,34 +26,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Build Wisper.app bundle
+# 3. Build Wisper.app bundle (native launcher, ad-hoc signed)
 # ---------------------------------------------------------------------------
 echo "Building Wisper.app bundle…"
-
-MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
-RES_DIR="$APP_BUNDLE/Contents/Resources"
-
-mkdir -p "$MACOS_DIR"
-mkdir -p "$RES_DIR"
-
-# Launcher shell script
-LAUNCHER="$MACOS_DIR/Wisper"
-cat > "$LAUNCHER" <<'LAUNCHER_EOF'
-#!/bin/bash
-REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
-source "$REPO/.venv/bin/activate"
-exec python3 "$REPO/app.py"
-LAUNCHER_EOF
-chmod +x "$LAUNCHER"
-
-# Copy resources
-cp "$ICNS" "$RES_DIR/wisper.icns"
-cp "$SCRIPT_DIR/assets/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
-
-echo "Wisper.app bundle built at $APP_BUNDLE"
+"$SCRIPT_DIR/build_app.sh" --if-changed
+LAUNCHER="$APP_BUNDLE/Contents/MacOS/Wisper"
 
 # ---------------------------------------------------------------------------
-# 4. Write launchd plist pointing at the shell launcher (not python directly)
+# 4. Write launchd plist pointing at the native launcher (not python directly)
 # ---------------------------------------------------------------------------
 mkdir -p "$HOME/Library/LaunchAgents"
 mkdir -p "$HOME/.wisper"
@@ -107,9 +87,8 @@ echo "Wisper installed and running."
 echo ""
 echo "Activity Monitor will now show the process as 'Wisper' with the custom icon."
 echo ""
-echo "Two permissions required (macOS will prompt on first use):"
-echo "   1. Accessibility -- System Settings -> Privacy & Security -> Accessibility"
-echo "   2. Microphone    -- System Settings -> Privacy & Security -> Microphone"
+echo "A 'Set up Wisper' checklist will open to walk you through the Microphone"
+echo "and Accessibility permissions (reopen it from the menu bar: Permissions...)."
 echo ""
 echo "If the Globe/fn key opens the emoji picker instead of recording:"
 echo "   System Settings -> Keyboard -> 'Press Globe key to' -> set to 'Do Nothing'"
