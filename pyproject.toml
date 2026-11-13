@@ -12,7 +12,7 @@ select = ["E", "F", "W", "I"]
 [tool.ruff.lint.isort]
 known-first-party = [
     "config", "history", "hotkey", "overlay",
-    "recorder", "transcriber", "updater",
+    "recorder", "transcriber", "updater", "permissions", "setup_window",
 ]
 
 [tool.pytest.ini_options]

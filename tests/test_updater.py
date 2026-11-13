@@ -183,3 +183,35 @@ def test_install_skips_pip_when_venv_absent(tmp_path):
 
     # [0] remote get-url, [1] git pull — no pip
     assert len(captured) == 2
+
+
+def _run_install_with_build_script(tmp_path, build_result):
+    (tmp_path / "build_app.sh").touch()
+    captured = []
+
+    def fake_run(args, **kw):
+        captured.append(args)
+        if "get-url" in args:
+            return _proc(0, _GITHUB_URL)
+        if args[0] == "bash":
+            return build_result
+        return _proc(0)
+
+    with patch("updater.subprocess.run", side_effect=fake_run):
+        ok = install_update(tmp_path)
+    return ok, captured
+
+
+def test_install_rebuilds_app_only_if_launcher_changed(tmp_path):
+    result = _proc(0, "Wisper.app is up to date\n")
+    ok, captured = _run_install_with_build_script(tmp_path, result)
+    assert ok is True
+    assert captured[-1] == ["bash", str(tmp_path / "build_app.sh"), "--if-changed"]
+
+
+def test_install_succeeds_even_if_app_rebuild_fails(tmp_path):
+    result = _proc(1, "")
+    result.stderr = "clang not found"
+    ok, captured = _run_install_with_build_script(tmp_path, result)
+    assert ok is True  # code update still applies; old launcher keeps working
+    assert captured[-1][0] == "bash"

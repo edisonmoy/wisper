@@ -91,6 +91,21 @@ def install_update(repo_dir: Path) -> bool:
                 check=False,
             )
             logger.info("Update install: synced dependencies")
+        build = repo_dir / "build_app.sh"
+        if build.exists():
+            # Rebuilds only if the launcher changed — a rebuild changes the code
+            # signature, which can make macOS ask for permissions again.
+            r = subprocess.run(
+                ["bash", str(build), "--if-changed"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+            if r.returncode != 0:
+                logger.error("Update install: app rebuild failed: %s", r.stderr.strip())
+            else:
+                logger.info("Update install: %s", r.stdout.strip())
         return True
     except Exception as exc:
         logger.error("Update install failed: %s", exc)

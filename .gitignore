@@ -6,6 +6,7 @@ __pycache__/
 
 # Build artifacts
 Wisper.app/
+.Wisper.app.build/
 
 # Generated assets (reproducible via make_icon.py)
 assets/wisper.icns

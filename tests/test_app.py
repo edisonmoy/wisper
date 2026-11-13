@@ -15,6 +15,7 @@ import pytest
 
 import app as app_mod
 import config as config_module
+import permissions
 from app import (
     _CLEANUP_LABELS,
     _HOTKEY_PRESETS,
@@ -58,8 +59,22 @@ def wa(tmp_app_dir):
     - rumps.quit_application → MagicMock (would terminate the process on macOS)
     - rumps.notification → MagicMock (would show OS dialogs on macOS)
     - app.AppKit → MagicMock (real NSPasteboard is not patchable on macOS)
+    - create_setup_window → MagicMock (no real NSWindow)
+    - live all_granted() / accessibility_status → granted (no real TCC lookups)
+    - _send_cmd_v → True (no synthetic keystrokes)
     """
-    with patch.object(app_mod, "create_recording_overlay", return_value=MagicMock()):
+    with (
+        patch.object(app_mod, "create_setup_window", return_value=MagicMock()),
+        # Live check → granted; an explicit status dict is evaluated for real.
+        patch.object(
+            app_mod,
+            "all_granted",
+            side_effect=lambda statuses=None: statuses is None or permissions.all_granted(statuses),
+        ),
+        patch.object(app_mod, "accessibility_status", return_value="granted"),
+        patch.object(app_mod, "_send_cmd_v", return_value=True),
+        patch.object(app_mod, "create_recording_overlay", return_value=MagicMock()),
+    ):
         with patch.object(app_mod.Transcriber, "preload"):
             with patch("app.threading.Timer", return_value=MagicMock()):
                 with (
@@ -537,49 +552,59 @@ def test_refresh_history_clears_old_items(wa):
 # ---------------------------------------------------------------------------
 
 
-def test_check_permissions_noop_when_import_fails(wa):
-    """If ApplicationServices is not importable, _check_permissions is a silent no-op."""
-    with patch.dict(sys.modules, {"ApplicationServices": None}):
-        wa._check_permissions()  # must not raise
-
-
-def test_check_permissions_warns_when_not_trusted(wa):
-    app_svc = MagicMock()
-    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
-    app_svc.AXIsProcessTrustedWithOptions.return_value = False
-    with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
+def test_check_permissions_silent_when_all_granted(wa):
+    wa._show_setup_pending = False
+    with patch.object(app_mod, "all_granted", return_value=True):
         wa._check_permissions()
-    wa._mock_notification.assert_called()
-    app_svc.AXIsProcessTrustedWithOptions.assert_called_once_with(
-        {"AXTrustedCheckOptionPrompt": True}
-    )
+    assert wa._show_setup_pending is False
+    assert wa._hotkey_label() in wa.status_item.title
 
 
-def test_check_permissions_silent_when_trusted(wa):
-    wa._mock_notification.reset_mock()
-    app_svc = MagicMock()
-    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
-    app_svc.AXIsProcessTrustedWithOptions.return_value = True
-    with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
+def test_check_permissions_warns_and_queues_checklist_when_missing(wa):
+    with patch.object(app_mod, "all_granted", return_value=False):
         wa._check_permissions()
-    wa._mock_notification.assert_not_called()
+    assert wa._show_setup_pending is True
+    assert wa.status_item.title.startswith("⚠")
+    wa.status_item.callback(wa.status_item)
+    wa.setup_window.show_.assert_called_once_with(None)
 
 
-def test_check_permissions_status_item_opens_settings_when_clicked(wa):
-    app_svc = MagicMock()
-    app_svc.kAXTrustedCheckOptionPrompt = "AXTrustedCheckOptionPrompt"
-    app_svc.AXIsProcessTrustedWithOptions.return_value = False
-    with patch.dict(sys.modules, {"ApplicationServices": app_svc}):
-        wa._check_permissions()
-    with patch("app.subprocess.run") as mock_run:
-        wa.status_item.callback(wa.status_item)
-    mock_run.assert_called_once_with(
-        [
-            "open",
-            "x-apple.systempreferences:com.apple.preference.security"
-            "?Privacy_Accessibility",
-        ]
-    )
+def test_ui_tick_opens_pending_checklist_once(wa):
+    wa._show_setup_pending = True
+    wa._ui_tick(None)
+    wa._ui_tick(None)
+    wa.setup_window.show_.assert_called_once_with(None)
+    assert wa._show_setup_pending is False
+
+
+def test_permissions_menu_item_opens_checklist(wa):
+    item = next(i for i in wa.menu if getattr(i, "title", None) == "Permissions…")
+    item.callback(item)
+    wa.setup_window.show_.assert_called_once_with(None)
+
+
+def test_permissions_changed_restarts_hotkey_when_accessibility_turns_on(wa):
+    wa._ax_granted = False
+    with patch.object(wa, "_setup_hotkey") as mock_setup:
+        wa._on_permissions_changed({"mic": "granted", "ax": "granted"})
+        wa._on_permissions_changed({"mic": "granted", "ax": "granted"})
+    mock_setup.assert_called_once()
+    assert wa._ax_granted is True
+
+
+def test_permissions_changed_all_granted_restores_idle_status(wa):
+    wa._show_permission_warning()
+    wa._on_permissions_changed({"mic": "granted", "ax": "granted"})
+    assert wa.status_item.title == wa._idle_title()
+    assert wa.status_item.callback is None
+
+
+def test_permissions_changed_missing_keeps_warning(wa):
+    with patch.object(wa, "_setup_hotkey") as mock_setup:
+        wa._on_permissions_changed({"mic": "missing", "ax": "missing"})
+    mock_setup.assert_not_called()
+    assert wa._ax_granted is False
+    assert wa.status_item.title.startswith("⚠")
 
 
 # ---------------------------------------------------------------------------
@@ -1144,25 +1169,56 @@ def test_notify_calls_rumps_notification(wa):
 
 
 # ---------------------------------------------------------------------------
-# _paste — osascript failure path
+# _paste — ⌘V delivery
 # ---------------------------------------------------------------------------
 
 
-def test_paste_logs_and_notifies_on_osascript_failure(wa):
+def test_paste_logs_and_notifies_when_cmd_v_not_sent(wa):
     wa._mock_appkit.NSPasteboard.generalPasteboard.return_value.pasteboardItems.return_value = []
-    ok = MagicMock(returncode=0)
-    fail = MagicMock(returncode=1, stderr=b"not trusted")
-    with patch("app.subprocess.run", side_effect=[ok, fail]):
+    with (
+        patch("app.subprocess.run", return_value=MagicMock(returncode=0)),
+        patch("app._send_cmd_v", return_value=False),
+    ):
         wa._paste("hello")
     wa._mock_notification.assert_called()
 
 
-def test_paste_does_not_notify_on_osascript_success(wa):
+def test_paste_does_not_notify_when_cmd_v_sent(wa):
     wa._mock_appkit.NSPasteboard.generalPasteboard.return_value.pasteboardItems.return_value = []
-    ok = MagicMock(returncode=0)
-    with patch("app.subprocess.run", side_effect=[ok, ok]):
+    with (
+        patch("app.subprocess.run", return_value=MagicMock(returncode=0)),
+        patch("app._send_cmd_v", return_value=True) as mock_send,
+    ):
         wa._paste("hello")
+    mock_send.assert_called_once()
     wa._mock_notification.assert_not_called()
+
+
+def test_send_cmd_v_skips_without_accessibility():
+    quartz = MagicMock()
+    with (
+        patch.object(app_mod, "accessibility_status", return_value="missing"),
+        patch.dict(sys.modules, {"Quartz": quartz}),
+    ):
+        assert app_mod._send_cmd_v() is False
+    quartz.CGEventPost.assert_not_called()
+
+
+def test_send_cmd_v_posts_key_down_and_up_with_command_flag():
+    quartz = MagicMock()
+    with (
+        patch.object(app_mod, "accessibility_status", return_value="granted"),
+        patch.dict(sys.modules, {"Quartz": quartz}),
+    ):
+        assert app_mod._send_cmd_v() is True
+    downs = [c.args[2] for c in quartz.CGEventCreateKeyboardEvent.call_args_list]
+    assert downs == [True, False]
+    assert all(c.args[1] == 9 for c in quartz.CGEventCreateKeyboardEvent.call_args_list)
+    assert quartz.CGEventSetFlags.call_count == 2
+    quartz.CGEventSetFlags.assert_called_with(
+        quartz.CGEventCreateKeyboardEvent.return_value, quartz.kCGEventFlagMaskCommand
+    )
+    assert quartz.CGEventPost.call_count == 2
 
 
 # ---------------------------------------------------------------------------
