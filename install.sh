@@ -69,18 +69,13 @@ cat > "$PLIST" <<EOF
 EOF
 
 # ---------------------------------------------------------------------------
-# 5. Remove macOS quarantine bit (set by browsers/downloads; blocks unsigned apps)
-# ---------------------------------------------------------------------------
-xattr -rd com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
-
-# ---------------------------------------------------------------------------
-# 6. Load launchd plist
+# 5. Load launchd plist
 # ---------------------------------------------------------------------------
 launchctl unload "$PLIST" 2>/dev/null || true
 launchctl load "$PLIST"
 
 # ---------------------------------------------------------------------------
-# 7. Setup instructions
+# 6. Setup instructions
 # ---------------------------------------------------------------------------
 echo ""
 echo "Wisper installed and running."

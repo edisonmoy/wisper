@@ -233,23 +233,16 @@ class SetupWindowController(NSObject):
     # -------------------------------------------------------------- internal
 
     @objc.python_method
-    def _all_granted(self):
-        return bool(self._statuses) and all(s == "granted" for s in self._statuses.values())
-
-    @objc.python_method
     def _stop_timer_if_done(self):
         # Keep polling after "Later" so a permission granted afterwards still
         # reaches the app (hotkey restart, menu bar warning cleared).
-        if self._timer is not None and self._all_granted():
+        if self._timer is not None and permissions.all_granted(self._statuses):
             self._timer.invalidate()
             self._timer = None
 
     @objc.python_method
     def _refresh(self, force=False):
-        statuses = {
-            "mic": permissions.microphone_status(),
-            "ax": permissions.accessibility_status(),
-        }
+        statuses = permissions.current_statuses()
         if statuses == self._statuses and not force:
             return
         changed = statuses != self._statuses
@@ -263,7 +256,7 @@ class SetupWindowController(NSObject):
             for view in self._drag_hint:
                 view.setHidden_(True)
 
-        everything = self._all_granted()
+        everything = permissions.all_granted(statuses)
         self._done_button.setTitle_("Done" if everything else "Later")
         self._done_button.setKeyEquivalent_("\r" if everything else "")
         self._intro.setStringValue_(_ALL_SET if everything else _INTRO)

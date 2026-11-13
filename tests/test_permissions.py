@@ -144,9 +144,29 @@ def test_request_accessibility_still_opens_settings_without_framework():
         ("denied", "granted", False),
     ],
 )
-def test_all_granted(mic, ax, expected):
+def test_all_granted_checks_live_status(mic, ax, expected):
     with (
         patch("permissions.microphone_status", return_value=mic),
         patch("permissions.accessibility_status", return_value=ax),
     ):
         assert permissions.all_granted() is expected
+
+
+def test_current_statuses():
+    with (
+        patch("permissions.microphone_status", return_value="granted"),
+        patch("permissions.accessibility_status", return_value="missing"),
+    ):
+        assert permissions.current_statuses() == {"mic": "granted", "ax": "missing"}
+
+
+@pytest.mark.parametrize(
+    "statuses, expected",
+    [
+        ({"mic": "granted", "ax": "granted"}, True),
+        ({"mic": "granted", "ax": "denied"}, False),
+        ({}, False),  # nothing checked yet
+    ],
+)
+def test_all_granted_with_given_statuses(statuses, expected):
+    assert permissions.all_granted(statuses) is expected

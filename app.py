@@ -472,7 +472,7 @@ class WisperApp(rumps.App):
             self._setup_hotkey()
         self._ax_granted = ax_granted
 
-        if all(s == "granted" for s in statuses.values()):
+        if all_granted(statuses):
             self.status_item.title = self._idle_title()
             self.status_item.set_callback(None)
         else:

@@ -15,6 +15,7 @@ import pytest
 
 import app as app_mod
 import config as config_module
+import permissions
 from app import (
     _CLEANUP_LABELS,
     _HOTKEY_PRESETS,
@@ -59,12 +60,17 @@ def wa(tmp_app_dir):
     - rumps.notification → MagicMock (would show OS dialogs on macOS)
     - app.AppKit → MagicMock (real NSPasteboard is not patchable on macOS)
     - create_setup_window → MagicMock (no real NSWindow)
-    - all_granted / accessibility_status → granted (no real TCC lookups)
+    - live all_granted() / accessibility_status → granted (no real TCC lookups)
     - _send_cmd_v → True (no synthetic keystrokes)
     """
     with (
         patch.object(app_mod, "create_setup_window", return_value=MagicMock()),
-        patch.object(app_mod, "all_granted", return_value=True),
+        # Live check → granted; an explicit status dict is evaluated for real.
+        patch.object(
+            app_mod,
+            "all_granted",
+            side_effect=lambda statuses=None: statuses is None or permissions.all_granted(statuses),
+        ),
         patch.object(app_mod, "accessibility_status", return_value="granted"),
         patch.object(app_mod, "_send_cmd_v", return_value=True),
         patch.object(app_mod, "create_recording_overlay", return_value=MagicMock()),

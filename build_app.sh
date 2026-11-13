@@ -52,6 +52,7 @@ codesign --force --sign - --identifier "$BUNDLE_ID" "$STAGING"
 
 rm -rf "$APP_BUNDLE"
 mv "$STAGING" "$APP_BUNDLE"
+# Clear the quarantine bit (set by browsers/downloads; blocks unsigned apps).
 xattr -rd com.apple.quarantine "$APP_BUNDLE" 2>/dev/null || true
 
 echo "Wisper.app built at $APP_BUNDLE"

@@ -116,5 +116,13 @@ def request_accessibility() -> None:
     open_settings("Accessibility")
 
 
-def all_granted() -> bool:
-    return microphone_status() == "granted" and accessibility_status() == "granted"
+def current_statuses() -> dict[str, Status]:
+    """Status of every permission Wisper needs, keyed "mic" / "ax"."""
+    return {"mic": microphone_status(), "ax": accessibility_status()}
+
+
+def all_granted(statuses: dict[str, Status] | None = None) -> bool:
+    """True if every permission is granted (checks live status if none given)."""
+    if statuses is None:
+        statuses = current_statuses()
+    return bool(statuses) and all(s == "granted" for s in statuses.values())
